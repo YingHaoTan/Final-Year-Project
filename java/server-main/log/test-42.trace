@@ -1,0 +1,2 @@
+3108 INFO  server.LogServiceTests: start sim 42
+3108 WARN  server.LogService: warning message

@@ -1,0 +1,532 @@
+3226 DEBUG server.ServerMessageReceiver: onMessage(String) - received message:
+<broker-authentication username="abc" brokerTime="0"/>
+3226 DEBUG server.ServerMessageReceiver: onMessage(String) - received message of type BrokerAuthentication
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.CapacityProfile
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.Accounting
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.Auctioneer
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.BalancingMarket
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.BootstrapDataCollector
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.BootstrapState
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.BrokerProxy
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.CapacityControl
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.CompetitionControl
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.CompetitionSetup
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.ContextService
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.CustomerModelAccessor
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.CustomerServiceAccessor
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.InitializationService
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.NewTariffListener
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.PhysicalEnvironment
+3413 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.ServerConfiguration
+3414 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.ServerProperties
+3414 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.TariffMarket
+3414 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.TimeslotPhaseProcessor
+3414 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.VisualizerMessageListener
+3414 INFO  common.XMLMessageConverter: processing class org.powertac.common.interfaces.VisualizerProxy
+3414 INFO  common.XMLMessageConverter: processing class org.powertac.common.RandomSeed
+3414 INFO  common.XMLMessageConverter: processing class org.powertac.common.RegulationAccumulator
+3414 INFO  common.XMLMessageConverter: processing class org.powertac.common.RegulationCapacity
+3415 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.BootstrapDataRepo
+3415 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.RandomSeedRepo
+3415 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.TariffSubscriptionRepo$1
+3415 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.TariffSubscriptionRepo
+3415 INFO  common.XMLMessageConverter: processing class org.powertac.common.TariffEvaluator$EvalData
+3415 INFO  common.XMLMessageConverter: processing class org.powertac.common.TariffEvaluator$TariffUtility
+3415 INFO  common.XMLMessageConverter: processing class org.powertac.common.TariffEvaluator
+3415 INFO  common.XMLMessageConverter: processing class org.powertac.common.TariffSubscription$ExpirationRecord
+3415 INFO  common.XMLMessageConverter: processing class org.powertac.common.TariffSubscription
+3416 INFO  common.XMLMessageConverter: processing class org.powertac.common.TransactionFactory
+3416 INFO  common.XMLMessageConverter: processing class org.powertac.common.Action
+3416 INFO  common.XMLMessageConverter: processing class org.powertac.common.BalancingTransaction
+3416 INFO  common.XMLMessageConverter: processing class org.powertac.common.BankTransaction
+3416 INFO  common.XMLMessageConverter: processing class org.powertac.common.Broker
+3416 INFO  common.XMLMessageConverter: processing class org.powertac.common.BrokerTransaction
+3416 INFO  common.XMLMessageConverter: processing class org.powertac.common.CapacityTransaction
+3416 INFO  common.XMLMessageConverter: processing class org.powertac.common.CashPosition
+3416 INFO  common.XMLMessageConverter: processing class org.powertac.common.ClearedTrade
+3416 INFO  common.XMLMessageConverter: processing class org.powertac.common.Competition
+3416 INFO  common.XMLMessageConverter: processing class org.powertac.common.config.ConfigurableInstance
+3416 INFO  common.XMLMessageConverter: processing class org.powertac.common.config.ConfigurableValue
+3416 INFO  common.XMLMessageConverter: processing class org.powertac.common.config.ConfigurationLister
+3416 INFO  common.XMLMessageConverter: processing class org.powertac.common.config.ConfigurationRecorder
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.config.Configurator$ConfigurableProperty
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.config.Configurator
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.config.package-info
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.CustomerInfo$CustomerClass
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.CustomerInfo
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.DistributionTransaction
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.enumerations.PowerType$TypeLabel
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.enumerations.PowerType
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.exceptions.PowerTacException
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.HourlyCharge
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.IdGenerator
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.MarketPosition
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.MarketTransaction
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.BalanceReport
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.BalancingControlEvent
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.BalancingOrder
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.BrokerAccept
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.BrokerAuthentication
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.ControlEvent
+3417 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.CustomerBootstrapData
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.DistributionReport
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.EconomicControlEvent
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.MarketBootstrapData
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.OrderStatus$Status
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.OrderStatus
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.package-info
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.PauseRelease
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.PauseRequest
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.SimEnd
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.SimPause
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.SimResume
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.SimStart
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.TariffExpire
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.TariffRevoke
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.TariffStatus$Status
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.TariffStatus
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.TariffUpdate
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.TimeslotComplete
+3418 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.TimeslotUpdate
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.VariableRateUpdate
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.msg.VisualizerStatusRequest
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.Order
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.Orderbook
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.OrderbookOrder
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.package-info
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.Rate$ProbeCharge
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.Rate
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.RateCore
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.RegulationRate$ResponseTime
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.RegulationRate
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.BrokerRepo
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.CustomerRepo$1
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.CustomerRepo$2
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.CustomerRepo
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.DomainRepo
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.OrderbookRepo
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.package-info
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.TariffRepo$BoPair
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.TariffRepo
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.TimeslotRepo
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.WeatherForecastRepo
+3419 INFO  common.XMLMessageConverter: processing class org.powertac.common.repo.WeatherReportRepo
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.spring.SpringApplicationContext
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.Tariff$RateKwh
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.Tariff$State
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.Tariff
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.TariffEvaluationHelper
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.TariffMessage
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.TariffSpecification
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.TariffTransaction$Type
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.TariffTransaction
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.TimedAction
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.TimeService$SimulationAction
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.TimeService
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.Timeslot
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.ValidatableMessage
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.WeatherForecast
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.WeatherForecastPrediction
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.WeatherReport
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.xml.BrokerConverter
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.xml.CustomerConverter
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.xml.DoubleArrayConverter
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.xml.FullCustomerConverter
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.xml.package-info
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.xml.PowerTypeConverter
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.xml.TariffSpecificationConverter
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.XMLMessageConverter
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.state.ChainedConstructor
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.state.Domain
+3420 INFO  common.XMLMessageConverter: processing class org.powertac.common.state.package-info
+3421 INFO  common.XMLMessageConverter: processing class org.powertac.common.state.StateChange
+3421 INFO  common.XMLMessageConverter: processing class org.powertac.common.state.StateLogging
+3421 INFO  common.XMLMessageConverter: processing class org.powertac.common.state.XStreamStateLoggable
+3456 INFO  server.ServerPropertiesService: lazyInit
+3459 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3459 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/BrooksideHomes.xml
+3462 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3462 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/CentervilleHomes.xml
+3465 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3465 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/DowntownOffices.xml
+3468 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3468 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/EastsideOffices.xml
+3470 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3470 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/FrostyStorage.xml
+3473 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3473 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/HextraChemical.xml
+3475 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3476 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/MedicalCenter.xml
+3478 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3479 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3481 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3481 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/SolarLeasing.xml
+3486 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3486 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/SunnyhillSolar.xml
+3489 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3489 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/WindmillCoOp.xml
+3491 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3492 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/customer-models/1.5.1-SNAPSHOT/customer-models-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3496 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3497 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/evcustomer/1.5.1-SNAPSHOT/evcustomer-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3511 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3512 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/test-classes/config/genco.properties
+3515 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3515 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/test-classes/config/server.properties
+3517 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3518 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/classes/config/server.properties
+3524 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3524 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/cpgenco.properties
+3525 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3525 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/genco.properties
+3525 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3526 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/misobuyer.properties
+3533 DEBUG server.ServerPropertiesService: setUserConfig file:src/test/propfiles/server.properties
+3535 INFO  server.ServerPropertiesService: lazyInit
+3544 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3544 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/BrooksideHomes.xml
+3548 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3548 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/CentervilleHomes.xml
+3550 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3551 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/DowntownOffices.xml
+3554 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3554 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/EastsideOffices.xml
+3557 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3557 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/FrostyStorage.xml
+3561 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3563 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/HextraChemical.xml
+3568 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3568 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/MedicalCenter.xml
+3571 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3571 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3605 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3605 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/SolarLeasing.xml
+3609 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3609 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/SunnyhillSolar.xml
+3613 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3613 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/WindmillCoOp.xml
+3616 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3616 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/customer-models/1.5.1-SNAPSHOT/customer-models-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3620 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3622 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/evcustomer/1.5.1-SNAPSHOT/evcustomer-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3636 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3636 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/test-classes/config/genco.properties
+3637 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3638 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/test-classes/config/server.properties
+3639 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3639 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/classes/config/server.properties
+3641 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3641 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/cpgenco.properties
+3642 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3642 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/genco.properties
+3643 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3643 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/misobuyer.properties
+3645 INFO  server.ServerPropertiesService: lazyInit
+3647 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3649 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/BrooksideHomes.xml
+3652 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3652 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/CentervilleHomes.xml
+3654 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3654 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/DowntownOffices.xml
+3656 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3656 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/EastsideOffices.xml
+3659 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3659 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/FrostyStorage.xml
+3661 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3661 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/HextraChemical.xml
+3664 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3664 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/MedicalCenter.xml
+3666 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3667 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3669 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3669 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/SolarLeasing.xml
+3672 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3672 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/SunnyhillSolar.xml
+3674 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3675 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/WindmillCoOp.xml
+3677 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3677 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/customer-models/1.5.1-SNAPSHOT/customer-models-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3681 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3681 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/evcustomer/1.5.1-SNAPSHOT/evcustomer-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3690 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3691 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/test-classes/config/genco.properties
+3692 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3692 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/test-classes/config/server.properties
+3693 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3693 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/classes/config/server.properties
+3695 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3695 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/cpgenco.properties
+3695 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3695 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/genco.properties
+3696 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3696 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/misobuyer.properties
+3699 DEBUG server.ServerPropertiesService: setUserConfig file:src/test/propfiles/server.properties
+3699 INFO  server.ServerPropertiesService: lazyInit
+3701 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3702 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/BrooksideHomes.xml
+3704 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3704 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/CentervilleHomes.xml
+3706 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3707 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/DowntownOffices.xml
+3709 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3709 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/EastsideOffices.xml
+3711 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3711 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/FrostyStorage.xml
+3714 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3714 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/HextraChemical.xml
+3716 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3716 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/MedicalCenter.xml
+3719 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3719 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3721 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3721 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/SolarLeasing.xml
+3723 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3723 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/SunnyhillSolar.xml
+3725 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3726 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/WindmillCoOp.xml
+3730 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3730 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/customer-models/1.5.1-SNAPSHOT/customer-models-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3733 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3733 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/evcustomer/1.5.1-SNAPSHOT/evcustomer-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3742 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3742 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/test-classes/config/genco.properties
+3743 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3744 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/test-classes/config/server.properties
+3744 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3745 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/classes/config/server.properties
+3746 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3746 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/cpgenco.properties
+3747 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3747 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/genco.properties
+3748 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3748 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/misobuyer.properties
+3749 INFO  server.ServerPropertiesService: lazyInit
+3752 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3752 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/BrooksideHomes.xml
+3755 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3755 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/CentervilleHomes.xml
+3758 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3758 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/DowntownOffices.xml
+3760 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3760 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/EastsideOffices.xml
+3762 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3762 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/FrostyStorage.xml
+3765 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3765 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/HextraChemical.xml
+3767 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3767 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/MedicalCenter.xml
+3770 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3770 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3772 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3772 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/SolarLeasing.xml
+3775 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3775 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/SunnyhillSolar.xml
+3777 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3777 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/WindmillCoOp.xml
+3779 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3779 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/customer-models/1.5.1-SNAPSHOT/customer-models-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3783 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3783 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/evcustomer/1.5.1-SNAPSHOT/evcustomer-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3793 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3793 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/test-classes/config/genco.properties
+3794 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3794 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/test-classes/config/server.properties
+3795 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3796 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/classes/config/server.properties
+3797 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3797 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/cpgenco.properties
+3798 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3798 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/genco.properties
+3798 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3799 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/misobuyer.properties
+3801 INFO  server.ServerPropertiesService: lazyInit
+3804 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3804 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/BrooksideHomes.xml
+3806 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3806 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/CentervilleHomes.xml
+3808 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3809 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/DowntownOffices.xml
+3811 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3811 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/EastsideOffices.xml
+3814 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3814 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/FrostyStorage.xml
+3817 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3817 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/HextraChemical.xml
+3819 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3819 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/MedicalCenter.xml
+3822 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3822 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3836 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3836 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/SolarLeasing.xml
+3838 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3838 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/SunnyhillSolar.xml
+3841 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3841 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/factored-customer/1.5.1-SNAPSHOT/factored-customer-1.5.1-SNAPSHOT.jar!/config/WindmillCoOp.xml
+3843 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3843 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/customer-models/1.5.1-SNAPSHOT/customer-models-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3846 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3846 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/evcustomer/1.5.1-SNAPSHOT/evcustomer-1.5.1-SNAPSHOT.jar!/config/properties.xml
+3854 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3854 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/test-classes/config/genco.properties
+3855 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3855 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/test-classes/config/server.properties
+3856 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.FileSystemResource
+3856 INFO  server.ServerPropertiesService: loading config from file:/C:/Users/Ying%20Hao/Desktop/Final%20Year%20Project/java/server-main/target/classes/config/server.properties
+3858 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3858 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/cpgenco.properties
+3858 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3858 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/genco.properties
+3859 DEBUG server.ServerPropertiesService: resource class: org.springframework.core.io.UrlResource
+3859 INFO  server.ServerPropertiesService: loading config from jar:file:/C:/Users/Ying%20Hao/.m2/repository/org/powertac/genco/1.5.1-SNAPSHOT/genco-1.5.1-SNAPSHOT.jar!/config/misobuyer.properties
+3859 DEBUG config.Configurator: configuring instances for type org.powertac.genco.Genco
+3859 DEBUG config.Configurator: config prefix genco.genco
+3859 DEBUG config.Configurator: config subset empty: false
+3873 DEBUG config.Configurator: Analyzing class org.powertac.genco.Genco
+3873 DEBUG config.Configurator: ConfigurableValue method found on withVariability
+3873 DEBUG config.Configurator: removing 'with' from withVariability
+3873 DEBUG config.Configurator: getter name getVariability
+3873 DEBUG config.Configurator: ConfigurableValue method found on withCost
+3873 DEBUG config.Configurator: removing 'with' from withCost
+3873 DEBUG config.Configurator: getter name getCost
+3873 DEBUG config.Configurator: ConfigurableValue method found on withReliability
+3873 DEBUG config.Configurator: removing 'with' from withReliability
+3873 DEBUG config.Configurator: getter name getReliability
+3873 DEBUG config.Configurator: ConfigurableValue method found on withNominalCapacity
+3873 DEBUG config.Configurator: removing 'with' from withNominalCapacity
+3873 DEBUG config.Configurator: getter name getNominalCapacity
+3873 DEBUG config.Configurator: ConfigurableValue method found on withCarbonEmissionRate
+3873 DEBUG config.Configurator: removing 'with' from withCarbonEmissionRate
+3873 DEBUG config.Configurator: getter name getCarbonEmissionRate
+3873 DEBUG config.Configurator: ConfigurableValue method found on withCommitmentLeadtime
+3874 DEBUG config.Configurator: removing 'with' from withCommitmentLeadtime
+3874 DEBUG config.Configurator: getter name getCommitmentLeadtime
+3874 DEBUG config.Configurator: Configuring property nominalCapacity
+3874 DEBUG config.Configurator: Configuring property variability
+3874 DEBUG config.Configurator: Configuring property reliability
+3874 DEBUG config.Configurator: Configuring property cost
+3874 DEBUG config.Configurator: Configuring property commitmentLeadtime
+3875 DEBUG config.Configurator: Configuring property carbonEmissionRate
+3875 DEBUG config.Configurator: Configuring property nominalCapacity
+3875 DEBUG config.Configurator: Configuring property variability
+3876 DEBUG config.Configurator: Configuring property reliability
+3876 DEBUG config.Configurator: Configuring property cost
+3876 DEBUG config.Configurator: Configuring property commitmentLeadtime
+3876 DEBUG config.Configurator: Configuring property carbonEmissionRate
+3993 DEBUG repo.TimeslotRepo: recycle
+3994 DEBUG common.TimeService: ts2 setCurrentTime to 2010-04-01T00:00:00.000Z
+3997 ERROR config.Configurator: Cannot configure - no Configuration set
+3998 DEBUG repo.TimeslotRepo: recycle
+3999 DEBUG common.TimeService: ts2 setCurrentTime to 2010-04-01T00:00:00.000Z
+3999 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+3999 INFO  server.WeatherService: Timeslot 0 WeatherService reports time to make request for weather data
+3999 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+4001 INFO  server.WeatherService: Query datetime value for REST call: 2010040100
+4839 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+5686 INFO  server.WeatherService: 24 WeatherReports fetched from xml response.
+5688 INFO  server.WeatherService: 576 WeatherForecasts fetched from xml response.
+5688 DEBUG server.WeatherService: Got data via a web request
+5688 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+5688 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+5689 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+5689 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+5689 DEBUG common.TimeService: ts2 setCurrentTime to 2010-04-01T01:00:00.000Z
+5689 DEBUG repo.TimeslotRepo: find 2010-04-01T01:00:00.000Z
+5689 DEBUG repo.TimeslotRepo: find 2010-04-01T01:00:00.000Z
+5689 DEBUG repo.TimeslotRepo: find 2010-04-01T01:00:00.000Z
+5689 DEBUG repo.TimeslotRepo: find 2010-04-01T01:00:00.000Z
+5689 DEBUG repo.TimeslotRepo: find 2010-04-01T01:00:00.000Z
+5689 DEBUG repo.TimeslotRepo: find 2010-04-01T01:00:00.000Z
+5689 DEBUG repo.TimeslotRepo: find 2010-04-01T01:00:00.000Z
+5689 DEBUG repo.TimeslotRepo: find 2010-04-01T01:00:00.000Z
+5690 DEBUG repo.TimeslotRepo: recycle
+5691 DEBUG common.TimeService: ts2 setCurrentTime to 2010-04-01T00:00:00.000Z
+5691 DEBUG config.Configurator: configuring object of type org.powertac.server.WeatherService
+5691 DEBUG config.Configurator: config prefix server.weatherService
+5691 DEBUG config.Configurator: config subset empty: false
+5691 DEBUG config.Configurator: Analyzing class org.powertac.server.WeatherService
+5691 DEBUG config.Configurator: ConfigurableValue field weatherLocation
+5691 DEBUG config.Configurator: ConfigurableValue field serverUrl
+5691 DEBUG config.Configurator: ConfigurableValue field blocking
+5691 DEBUG config.Configurator: ConfigurableValue field weatherData
+5691 DEBUG config.Configurator: ConfigurableValue field weatherReqInterval
+5691 DEBUG config.Configurator: ConfigurableValue field forecastHorizon
+5691 DEBUG config.Configurator: Configuring property blocking
+5692 DEBUG config.Configurator: Configuring property forecastHorizon
+5692 DEBUG config.Configurator: Configuring property serverUrl
+5692 DEBUG config.Configurator: Configuring property weatherReqInterval
+5694 DEBUG repo.TimeslotRepo: recycle
+5694 DEBUG common.TimeService: ts2 setCurrentTime to 2010-04-01T00:00:00.000Z
+5694 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+5694 INFO  server.WeatherService: Timeslot 0 WeatherService reports time to make request for weather data
+5694 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+5694 INFO  server.WeatherService: Query datetime value for REST call: 2010040100
+6077 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+6150 INFO  server.WeatherService: 24 WeatherReports fetched from xml response.
+6151 INFO  server.WeatherService: 576 WeatherForecasts fetched from xml response.
+6151 DEBUG server.WeatherService: Got data via a web request
+6151 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+6151 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+6151 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+6151 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+6153 DEBUG repo.TimeslotRepo: recycle
+6153 DEBUG common.TimeService: ts2 setCurrentTime to 2010-04-01T00:00:00.000Z
+6153 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+6153 INFO  server.WeatherService: Timeslot 0 WeatherService reports time to make request for weather data
+6153 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+6153 INFO  server.WeatherService: Query datetime value for REST call: 2010040100
+6557 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+6604 INFO  server.WeatherService: 24 WeatherReports fetched from xml response.
+6605 INFO  server.WeatherService: 576 WeatherForecasts fetched from xml response.
+6605 DEBUG server.WeatherService: Got data via a web request
+6605 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+6606 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+6606 DEBUG common.TimeService: ts2 setCurrentTime to 2010-04-01T01:00:00.000Z
+6606 DEBUG repo.TimeslotRepo: find 2010-04-01T01:00:00.000Z
+6606 DEBUG repo.TimeslotRepo: find 2010-04-01T01:00:00.000Z
+6606 DEBUG repo.TimeslotRepo: find 2010-04-01T01:00:00.000Z
+6607 DEBUG repo.TimeslotRepo: recycle
+6607 DEBUG common.TimeService: ts2 setCurrentTime to 2010-04-01T00:00:00.000Z
+6607 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+6607 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+6607 INFO  server.WeatherService: Timeslot 0 WeatherService reports time to make request for weather data
+6607 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+6607 INFO  server.WeatherService: Query datetime value for REST call: 2010040100
+7025 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+7077 INFO  server.WeatherService: 24 WeatherReports fetched from xml response.
+7078 INFO  server.WeatherService: 576 WeatherForecasts fetched from xml response.
+7078 DEBUG server.WeatherService: Got data via a web request
+7078 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+7078 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+7079 DEBUG repo.TimeslotRepo: recycle
+7079 DEBUG common.TimeService: ts2 setCurrentTime to 2010-04-01T00:00:00.000Z
+7079 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+7079 INFO  server.WeatherService: Timeslot 0 WeatherService reports time to make request for weather data
+7079 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+7080 INFO  server.WeatherService: Query datetime value for REST call: 2010040100
+7492 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+7560 INFO  server.WeatherService: 24 WeatherReports fetched from xml response.
+7561 INFO  server.WeatherService: 576 WeatherForecasts fetched from xml response.
+7561 DEBUG server.WeatherService: Got data via a web request
+7561 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+7561 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+7561 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+7561 DEBUG repo.TimeslotRepo: find 2010-04-01T00:00:00.000Z
+7562 DEBUG common.TimeService: ts2 setCurrentTime to 2010-04-02T00:00:00.000Z
+7562 DEBUG repo.TimeslotRepo: find 2010-04-02T00:00:00.000Z
+7562 INFO  server.WeatherService: Timeslot 24 WeatherService reports time to make request for weather data
+7562 DEBUG repo.TimeslotRepo: find 2010-04-02T00:00:00.000Z
+7562 INFO  server.WeatherService: Query datetime value for REST call: 2010040200
+7947 INFO  server.WeatherService: 24 WeatherReports fetched from xml response.
+7948 INFO  server.WeatherService: 576 WeatherForecasts fetched from xml response.
+7948 DEBUG server.WeatherService: Got data via a web request
+7948 DEBUG repo.TimeslotRepo: find 2010-04-02T00:00:00.000Z
+7948 DEBUG repo.TimeslotRepo: find 2010-04-02T00:00:00.000Z
+7948 DEBUG repo.TimeslotRepo: find 2010-04-02T00:00:00.000Z
+7948 DEBUG repo.TimeslotRepo: find 2010-04-02T00:00:00.000Z
+7948 DEBUG common.TimeService: ts2 setCurrentTime to 2010-04-02T23:00:00.000Z
+7949 DEBUG repo.TimeslotRepo: find 2010-04-02T23:00:00.000Z
+7949 DEBUG repo.TimeslotRepo: find 2010-04-02T23:00:00.000Z
+7949 DEBUG repo.TimeslotRepo: find 2010-04-02T23:00:00.000Z
+7949 DEBUG repo.TimeslotRepo: find 2010-04-02T23:00:00.000Z
+7949 DEBUG repo.TimeslotRepo: find 2010-04-02T23:00:00.000Z
+7949 DEBUG repo.TimeslotRepo: find 2010-04-02T23:00:00.000Z

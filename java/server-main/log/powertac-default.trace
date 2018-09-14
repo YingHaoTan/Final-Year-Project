@@ -1,0 +1,96 @@
+2974 INFO  server.CompetitionSetupService: preGame() - start game null
+2976 INFO  server.CompetitionSetupService: POM version ID: null
+2977 INFO  server.CompetitionSetupService: pre-game initialization
+2977 DEBUG config.Configurator: configuring object of type org.powertac.common.Competition
+2977 DEBUG config.Configurator: config prefix common.competition
+2979 DEBUG config.Configurator: config subset empty: false
+2981 DEBUG config.Configurator: Analyzing class org.powertac.common.Competition
+2981 DEBUG config.Configurator: ConfigurableValue method found on withSimulationBaseTime
+2981 DEBUG config.Configurator: removing 'with' from withSimulationBaseTime
+2981 DEBUG config.Configurator: getter name getSimulationBaseTime
+2981 WARN  config.Configurator: Type mismatch: cannot use default value (org.joda.time.Instant) for  (java.lang.String)
+2981 DEBUG config.Configurator: ConfigurableValue method found on withPomId
+2981 DEBUG config.Configurator: removing 'with' from withPomId
+2981 DEBUG config.Configurator: getter name getPomId
+2981 DEBUG config.Configurator: ConfigurableValue method found on withLatitude
+2981 DEBUG config.Configurator: removing 'with' from withLatitude
+2981 DEBUG config.Configurator: getter name getLatitude
+2981 DEBUG config.Configurator: ConfigurableValue method found on withDescription
+2981 DEBUG config.Configurator: removing 'with' from withDescription
+2981 DEBUG config.Configurator: getter name getDescription
+2981 DEBUG config.Configurator: ConfigurableValue method found on withMaxDownRegulationPaymentRatio
+2981 DEBUG config.Configurator: removing 'with' from withMaxDownRegulationPaymentRatio
+2981 DEBUG config.Configurator: getter name getMaxDownRegulationPaymentRatio
+2981 DEBUG config.Configurator: ConfigurableValue method found on withExpectedTimeslotCount
+2981 DEBUG config.Configurator: removing 'with' from withExpectedTimeslotCount
+2981 DEBUG config.Configurator: getter name getExpectedTimeslotCount
+2982 DEBUG config.Configurator: ConfigurableValue method found on withMinimumOrderQuantity
+2982 DEBUG config.Configurator: removing 'with' from withMinimumOrderQuantity
+2982 DEBUG config.Configurator: getter name getMinimumOrderQuantity
+2982 DEBUG config.Configurator: ConfigurableValue method found on withBootstrapTimeslotCount
+2982 DEBUG config.Configurator: removing 'with' from withBootstrapTimeslotCount
+2982 DEBUG config.Configurator: getter name getBootstrapTimeslotCount
+2982 DEBUG config.Configurator: ConfigurableValue method found on withSimulationRate
+2982 DEBUG config.Configurator: removing 'with' from withSimulationRate
+2982 DEBUG config.Configurator: getter name getSimulationRate
+2982 DEBUG config.Configurator: ConfigurableValue method found on withTimeslotsOpen
+2982 DEBUG config.Configurator: removing 'with' from withTimeslotsOpen
+2982 DEBUG config.Configurator: getter name getTimeslotsOpen
+2982 DEBUG config.Configurator: ConfigurableValue method found on withMinimumTimeslotCount
+2982 DEBUG config.Configurator: removing 'with' from withMinimumTimeslotCount
+2982 DEBUG config.Configurator: getter name getMinimumTimeslotCount
+2982 DEBUG config.Configurator: ConfigurableValue method found on withDeactivateTimeslotsAhead
+2982 DEBUG config.Configurator: removing 'with' from withDeactivateTimeslotsAhead
+2982 DEBUG config.Configurator: getter name getDeactivateTimeslotsAhead
+2982 DEBUG config.Configurator: ConfigurableValue method found on withSimulationModulo
+2982 DEBUG config.Configurator: removing 'with' from withSimulationModulo
+2982 DEBUG config.Configurator: getter name getSimulationModulo
+2982 DEBUG config.Configurator: ConfigurableValue method found on withUpRegulationDiscount
+2982 DEBUG config.Configurator: removing 'with' from withUpRegulationDiscount
+2982 DEBUG config.Configurator: getter name getUpRegulationDiscount
+2982 DEBUG config.Configurator: ConfigurableValue method found on withSimulationTimeslotSeconds
+2983 DEBUG config.Configurator: removing 'with' from withSimulationTimeslotSeconds
+2983 DEBUG config.Configurator: getter name getSimulationTimeslotSeconds
+2983 DEBUG config.Configurator: ConfigurableValue method found on withMaxUpRegulationPaymentRatio
+2983 DEBUG config.Configurator: removing 'with' from withMaxUpRegulationPaymentRatio
+2983 DEBUG config.Configurator: getter name getMaxUpRegulationPaymentRatio
+2983 DEBUG config.Configurator: ConfigurableValue method found on withFixedTimeslotCount
+2983 DEBUG config.Configurator: removing 'with' from withFixedTimeslotCount
+2983 DEBUG config.Configurator: getter name getFixedTimeslotCount
+2983 DEBUG config.Configurator: ConfigurableValue method found on withTimezoneOffset
+2983 DEBUG config.Configurator: removing 'with' from withTimezoneOffset
+2983 DEBUG config.Configurator: getter name getTimezoneOffset
+2983 DEBUG config.Configurator: ConfigurableValue method found on withBootstrapDiscardedTimeslots
+2983 DEBUG config.Configurator: removing 'with' from withBootstrapDiscardedTimeslots
+2983 DEBUG config.Configurator: getter name getBootstrapDiscardedTimeslots
+2983 DEBUG config.Configurator: ConfigurableValue method found on withTimeslotLength
+2983 DEBUG config.Configurator: getter name getTimeslotLength
+2983 DEBUG config.Configurator: ConfigurableValue method found on withDownRegulationDiscount
+2983 DEBUG config.Configurator: removing 'with' from withDownRegulationDiscount
+2983 DEBUG config.Configurator: getter name getDownRegulationDiscount
+2983 DEBUG config.Configurator: ConfigurableValue method found on withEstimatedConsumptionPremium
+2983 DEBUG config.Configurator: removing 'with' from withEstimatedConsumptionPremium
+2983 DEBUG config.Configurator: getter name getEstimatedConsumptionPremium
+2984 DEBUG config.Configurator: Configuring property simulationBaseTime
+2992 DEBUG config.Configurator: Configuring property timezoneOffset
+2993 DEBUG config.Configurator: Configuring property latitude
+2994 DEBUG config.Configurator: Configuring property bootstrapTimeslotCount
+2994 DEBUG config.Configurator: Configuring property bootstrapDiscardedTimeslots
+2994 DEBUG config.Configurator: Configuring property minimumTimeslotCount
+2994 DEBUG config.Configurator: Configuring property expectedTimeslotCount
+2994 DEBUG config.Configurator: Configuring property timeslotLength
+2995 DEBUG config.Configurator: Configuring property simulationTimeslotSeconds
+2995 DEBUG config.Configurator: Configuring property timeslotsOpen
+2995 DEBUG config.Configurator: Configuring property deactivateTimeslotsAhead
+2995 DEBUG config.Configurator: Configuring property minimumOrderQuantity
+3006 DEBUG common.TimeService: ts0 setCurrentTime to 2009-10-10T00:00:00.000Z
+3016 DEBUG server.CompetitionSetupService: found 9 repos
+3016 DEBUG repo.TimeslotRepo: recycle
+3016 DEBUG repo.BrokerRepo: recycle
+3070 INFO  server.CompetitionControlService: pre-authorized buyer
+3070 INFO  server.CompetitionControlService: pre-authorized genco
+3070 INFO  server.CompetitionControlService: Authorized broker Sally / S1
+3070 INFO  server.CompetitionControlService: Authorized broker Jenny / J1
+3071 INFO  server.CompetitionControlService: pre-authorized default broker
+3071 INFO  server.CompetitionControlService: Authorized broker Sally / Sally
+3071 INFO  server.CompetitionControlService: Authorized broker Jenny / Jenny
