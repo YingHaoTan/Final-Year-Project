@@ -154,10 +154,10 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
         while True:
             try:
                 _, summary_value, step_count = sess.run([train_op, summary_op, global_step])
-                summary_writer.add_summary(summary_value, global_step=step_count)
             except tf.errors.OutOfRangeError:
                 sess.run(sync_var_op)
                 saver.save(sess, CHECKPOINT_PREFIX, global_step=step_count)
+                summary_writer.add_summary(summary_value, global_step=step_count)
 
                 update_idx = step_count // (NUM_UPDATES * (BUFFER_SIZE / MINIBATCH_SIZE))
                 print("Update %d completed, synchronizing variables" % update_idx)
