@@ -16,10 +16,28 @@ Inputs:
     Quantity of uncleared ask for 24 bidding timeslot [101-124]
     Average uncleared ask price for 24 bidding timeslot [125-148]
     Electricity balance for 24 bidding timeslot [149-172]
+
+    Percentage of subscribers for each PowerType [173 - 186]
+    Total power usage for each PowerType for previous timeslot [187 - 200]
+    Total number of subscribers for tariff for each PowerType [201 - 214]
+    Tariff fixed rate [215]
+    Early withdrawal penalty [216]
+    Periodic payment [217]
+    Minimum duration [218]
+    Maximum curtailment value [219]
+    Tariff active status [220]
+
 Outputs:
     Market Outputs:
         24 continuous valued policy representing price value to perform bid/ask
         24 continuous valued policy representing quantity value to perform bid/ask
+
+    Tariff Outputs:
+        1 category valued policy representing NONE, REVOKE, SUPERSEDE/ACTIVATE
+        1 category valued policy representing NORMAL, INTERRUPTIBLE
+        1 category valued policy representing Tariff PowerType
+        5 continuous valued policy representing TFF, EWP, PP, MD, MCV
+
     1 linear output representing V(s)
 """
 import tensorflow as tf
@@ -27,6 +45,7 @@ import tensorflow.layers as layers
 import tensorflow.initializers as init
 import tensorflow.contrib.cudnn_rnn as rnn
 import numpy as np
+from functools import reduce
 
 
 def __build_dense__(inputs, num_units, activation=None, initializer=init.orthogonal(),
@@ -40,6 +59,9 @@ class Policy:
     def __init__(self, name):
         self.Name = name
 
+    def num_outputs(self):
+        raise NotImplementedError
+
     def mode(self):
         raise NotImplementedError
 
@@ -51,6 +73,35 @@ class Policy:
 
     def sample(self):
         raise NotImplementedError
+
+
+class GroupedPolicy(Policy):
+
+    def __init__(self, policy_group, name="GroupedPolicy"):
+        super().__init__(name)
+        self.PolicyGroup = policy_group
+
+    def num_outputs(self):
+        return reduce(lambda x, y: x + y, map(lambda policy: policy.num_outputs(), self.PolicyGroup))
+
+    def mode(self):
+        return tf.concat([policy.mode() for policy in self.PolicyGroup], axis=-1)
+
+    def neglogp(self, x):
+        neglogp = []
+        index = 0
+        for policy in self.PolicyGroup:
+            nindex = index + policy.num_outputs()
+            neglogp.append(policy.neglogp(x[:, index: nindex]))
+            index = nindex
+
+        return tf.reduce_sum(tf.stack(neglogp, axis=1), axis=-1)
+
+    def entropy(self):
+        return tf.reduce_sum(tf.stack([policy.entropy() for policy in self.PolicyGroup], axis=1), axis=-1)
+
+    def sample(self):
+        return tf.concat([policy.sample() for policy in self.PolicyGroup], axis=-1)
 
 
 class CategoricalPolicy(Policy):
@@ -60,12 +111,16 @@ class CategoricalPolicy(Policy):
         self.Logits = __build_dense__(inputs, num_categories, name=name)
         self.NumCategories = num_categories
 
+    def num_outputs(self):
+        return 1
+
     def mode(self):
-        return tf.argmax(self.Logits, axis=-1)
+        return tf.cast(tf.argmax(self.Logits, axis=-1), tf.float32)
 
     def neglogp(self, x):
         return tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.Logits,
-                                                          labels=tf.one_hot(x, self.Logits.get_shape().as_list()[-1]))
+                                                          labels=tf.one_hot(tf.cast(tf.squeeze(x, axis=1), tf.int64),
+                                                                            self.Logits.get_shape().as_list()[-1]))
 
     def entropy(self):
         a0 = self.Logits - tf.reduce_max(self.Logits, axis=-1, keepdims=True)
@@ -75,25 +130,28 @@ class CategoricalPolicy(Policy):
         return tf.reduce_sum(p0 * (tf.log(z0) - a0), axis=-1)
 
     def sample(self):
-        return tf.argmax(self.Logits - tf.log(-tf.log(tf.random_uniform(tf.shape(self.Logits),
-                                                                        dtype=self.Logits.dtype))),
-                         axis=-1)
+        rand_sample = self.Logits - tf.log(-tf.log(tf.random_uniform(tf.shape(self.Logits), dtype=self.Logits.dtype)))
+        return tf.expand_dims(tf.cast(tf.argmax(rand_sample, axis=-1), tf.float32), axis=1)
 
 
 class ContinuousPolicy(Policy):
 
-    def __init__(self, inputs, num_outputs, name="ContinuousPolicy"):
+    def __init__(self, inputs, num_outputs, scale=30.0, name="ContinuousPolicy"):
         super().__init__(name)
         self.Mean = __build_dense__(inputs, num_outputs, name=name + "_Mean")
         self.LogStd = __build_dense__(inputs, num_outputs, initializer=init.zeros(),
                                       name=name + "_LogStd")
         self.Std = tf.exp(self.LogStd)
+        self.Scale = scale
+
+    def num_outputs(self):
+        return self.Mean.shape.dims[-1]
 
     def mode(self):
-        return self.Mean
+        return self.Mean * self.Scale
 
     def neglogp(self, x):
-        return 0.5 * tf.reduce_sum(tf.square((x  - self.Mean) / self.Std), axis=-1) \
+        return 0.5 * tf.reduce_sum(tf.square(((x / self.Scale) - self.Mean) / self.Std), axis=-1) \
                + 0.5 * np.log(2.0 * np.pi) * tf.to_float(tf.shape(x)[-1]) \
                + tf.reduce_sum(self.LogStd, axis=-1)
 
@@ -101,13 +159,13 @@ class ContinuousPolicy(Policy):
         return tf.reduce_sum(self.LogStd + .5 * np.log(2.0 * np.pi * np.e), axis=-1)
 
     def sample(self):
-        return self.Mean + self.Std * tf.random_normal(tf.shape(self.Mean))
+        return (self.Mean + self.Std * tf.random_normal(tf.shape(self.Mean))) * self.Scale
 
 
 class Model:
     NUM_ENABLED_TIMESLOT = 24
-    ACTION_COUNT = 48
-    FEATURE_COUNT = 172
+    ACTION_COUNT = 56
+    FEATURE_COUNT = 220
     HIDDEN_STATE_COUNT = 1024
 
     def __init__(self, inputs, state_tuple_in, name="Model"):
@@ -126,9 +184,17 @@ class Model:
             self.Name = name
             self.Inputs = inputs
             self.StateTupleOut = state_tuple_in
-            self.MarketPolicies = ContinuousPolicy(internal_state, 2 * Model.NUM_ENABLED_TIMESLOT, "MarketPolicy")
+            self.Policies = GroupedPolicy([ContinuousPolicy(internal_state,
+                                                            2 * Model.NUM_ENABLED_TIMESLOT,
+                                                            name="MarketPolicy"),
+                                           GroupedPolicy([CategoricalPolicy(internal_state, 3, name="TariffAction"),
+                                                          CategoricalPolicy(internal_state, 2, name="TariffType"),
+                                                          CategoricalPolicy(internal_state, 14, name="PowerType"),
+                                                          ContinuousPolicy(internal_state, 5, name="TariffValues")],
+                                                         name="TariffPolicy")],
+                                          name="Policy")
             self.StateValue = __build_dense__(internal_state, 1, name="StateValue")
-            self.EvaluationOp = self.MarketPolicies.sample()
+            self.EvaluationOp = self.Policies.sample()
 
     @property
     def variables(self):

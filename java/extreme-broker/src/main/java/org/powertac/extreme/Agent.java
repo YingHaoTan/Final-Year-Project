@@ -4,8 +4,7 @@ import java.io.IOException;
 import org.powertac.common.Competition;
 import org.powertac.common.config.ConfigurableValue;
 import org.powertac.common.repo.TimeslotRepo;
-import org.powertac.extreme.actors.Actor;
-import org.powertac.extreme.actors.MarketActor;
+import org.powertac.extreme.actors.AgentActor;
 import org.powertac.extreme.backend.AgentConnection;
 import org.powertac.extreme.models.AgentState;
 import org.powertac.samplebroker.interfaces.Activatable;
@@ -28,14 +27,14 @@ public class Agent implements Initializable, Activatable {
 	
 	private Competition competition;
 	private AgentConnection connection;
-	private Actor actor;
+	private AgentActor actor;
 
 	@Override
 	public synchronized void activate(int timeslotIndex) {
 		try {
 			connection.write(state.serialize());
 			actor.deserialize(connection.read(actor.getSizeInBytes()));
-			actor.act(competition, timeslotRepo.enabledTimeslots());
+			actor.act(competition, timeslotRepo.enabledTimeslots(), state);
 		} catch(IOException e) {
 			throw new RuntimeException(e);
 		}
@@ -45,7 +44,7 @@ public class Agent implements Initializable, Activatable {
 	public void initialize(BrokerContext broker) {
 		configurator.configureMe(this);
 		
-		this.actor = new MarketActor(broker);
+		this.actor = new AgentActor(broker);
 		
 		try {
 			this.connection = new AgentConnection(backendPortNumber);

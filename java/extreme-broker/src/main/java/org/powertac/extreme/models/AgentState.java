@@ -17,6 +17,8 @@ public class AgentState implements ISerialize, Initializable {
 	@Autowired
 	private MarketState marketstate;
 	@Autowired
+	private TariffState tariffstate;
+	@Autowired
 	private TimeslotRepo timeservice;
 	@Autowired
 	private BrokerPropertiesService configurator;
@@ -40,7 +42,7 @@ public class AgentState implements ISerialize, Initializable {
 
 	@Override
 	public int getSizeInBytes() {
-		return 20 + this.marketstate.getSizeInBytes();
+		return 20 + this.marketstate.getSizeInBytes() + this.tariffstate.getSizeInBytes();
 	}
 
 	@Override
@@ -55,6 +57,7 @@ public class AgentState implements ISerialize, Initializable {
 		buffer.putFloat((float) Math.sin(2 * Math.PI * day));
 		
 		this.marketstate.serialize(buffer);
+		this.tariffstate.serialize(buffer);
 	}
 
 }

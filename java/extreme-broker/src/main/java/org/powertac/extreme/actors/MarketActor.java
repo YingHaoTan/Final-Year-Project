@@ -6,9 +6,10 @@ import java.util.List;
 import org.powertac.common.Competition;
 import org.powertac.common.Order;
 import org.powertac.common.Timeslot;
+import org.powertac.extreme.models.MarketState;
 import org.powertac.samplebroker.interfaces.BrokerContext;
 
-public class MarketActor extends Actor {
+public class MarketActor extends Actor<MarketState> {
 	private float[] price;
 	private float[] quantity;
 	
@@ -32,7 +33,7 @@ public class MarketActor extends Actor {
 	}
 
 	@Override
-	public void act(Competition competition, List<Timeslot> enabledTimeslots) {
+	public void act(Competition competition, List<Timeslot> enabledTimeslots, MarketState state) {
 		BrokerContext context = this.getContext();
 		for (int i = 0; i < quantity.length; i++) {
 			if (Math.abs(quantity[i]) >= competition.getMinimumOrderQuantity())
