@@ -64,14 +64,17 @@ class PowerTACGameHook(AgentServerHook):
     SCRATCH_BOOTSTRAP_DIR = os.path.join(BOOTSTRAP_DIR, "NextGame")
     INTERPRETER_COMMAND = ["java", "-jar"]
 
-    def __init__(self, model_builder_fn, num_clients: int, powertac_port: int, name="AgentServerHook"):
+    def __init__(self, model_builder_fn, num_clients: int, powertac_port: int,
+                 cpu_semaphore: threading.BoundedSemaphore, name="AgentServerHook"):
         super().__init__(model_builder_fn, num_clients, name)
         self.PowerTACPort = powertac_port
+        self.CPUSemaphore = cpu_semaphore
+        self.SemaphoreAcquired = False
         self.ServerProcess = None
         self.BootstrapProcess = None
         self.ClientProcesses = [None] * num_clients
 
-    def start_bootstrap_process(self):
+    def start_bootstrap_process(self, block=False):
         self.BootstrapProcess = subprocess.Popen([*PowerTACGameHook.INTERPRETER_COMMAND,
                                                   os.path.relpath(os.path.join(PowerTACGameHook.EXECUTABLE_DIR,
                                                                                "server.jar"),
@@ -80,8 +83,10 @@ class PowerTACGameHook(AgentServerHook):
                                                   self.Name],
                                                  cwd=PowerTACGameHook.SCRATCH_BOOTSTRAP_DIR,
                                                  stdin=subprocess.PIPE,
-                                                 stdout=subprocess.PIPE,
-                                                 stderr=subprocess.PIPE)
+                                                 stdout=subprocess.PIPE)
+
+        if block:
+            self.BootstrapProcess.communicate()
 
     def setup(self, server_instance, **kwargs):
         scratch_bootstrap_file = os.path.join(PowerTACGameHook.SCRATCH_BOOTSTRAP_DIR, self.Name)
@@ -89,13 +94,14 @@ class PowerTACGameHook(AgentServerHook):
         broker_identities = ",".join("Extreme%d" % idx for idx in range(self.ClientCount))
 
         if not os.path.exists(scratch_bootstrap_file):
-            self.start_bootstrap_process()
-            self.BootstrapProcess.communicate()
+            self.start_bootstrap_process(block=True)
 
         if os.path.exists(bootstrap_file):
             os.remove(bootstrap_file)
 
         os.rename(scratch_bootstrap_file, bootstrap_file)
+
+        self.CPUSemaphore.acquire()
 
         self.ServerProcess = subprocess.Popen([*PowerTACGameHook.INTERPRETER_COMMAND,
                                                "server.jar",
@@ -108,8 +114,8 @@ class PowerTACGameHook(AgentServerHook):
                                                broker_identities],
                                               cwd=PowerTACGameHook.EXECUTABLE_DIR,
                                               stdin=subprocess.PIPE,
-                                              stdout=subprocess.PIPE,
-                                              stderr=subprocess.PIPE)
+                                              stdout=subprocess.PIPE)
+
         for index in range(self.ClientCount):
             self.ClientProcesses[index] = subprocess.Popen([*PowerTACGameHook.INTERPRETER_COMMAND,
                                                             "broker.jar",
@@ -121,27 +127,38 @@ class PowerTACGameHook(AgentServerHook):
                                                             "config/broker%d.properties" % index],
                                                            cwd=PowerTACGameHook.EXECUTABLE_DIR,
                                                            stdin=subprocess.PIPE,
-                                                           stdout=subprocess.PIPE,
-                                                           stderr=subprocess.PIPE)
+                                                           stdout=subprocess.PIPE)
 
         self.start_bootstrap_process()
+        self.SemaphoreAcquired = True
+
+    def on_step(self, observations, session, **kwargs):
+        self.try_release_semaphore()
+        return super().on_step(observations, session, **kwargs)
 
     def on_stop(self, session, **kwargs):
-        self.ServerProcess.communicate()
+        self.try_release_semaphore()
         self.BootstrapProcess.communicate()
-        utility.apply(lambda client: client.communicate(), self.ClientProcesses)
+        self.ServerProcess.terminate()
+        utility.apply(lambda client: client.terminate(), self.ClientProcesses)
+
+    def try_release_semaphore(self):
+        if self.SemaphoreAcquired:
+            self.CPUSemaphore.release()
+            self.SemaphoreAcquired = False
 
 
 class PowerTACRolloutHook(PowerTACGameHook):
 
     def __init__(self, model_builder_fn, num_clients: int, powertac_port: int,
-                 rollout_size: int, recv_queue: queue.Queue, semaphore: threading.Semaphore,
+                 cpu_semaphore: threading.BoundedSemaphore, rollout_size: int, recv_queue: queue.Queue,
                  name="PowerTACRolloutHook"):
-        super().__init__(model_builder_fn, num_clients, powertac_port, name)
+        super().__init__(model_builder_fn, num_clients, powertac_port, cpu_semaphore, name)
 
+        self.ModelVersion = 0
+        self.ExpectedModelVersion = 0
         self.RolloutSize = rollout_size
         self.RecvQueue = recv_queue
-        self.Semaphore = semaphore
         self.__rollout_states__ = None
         self.__observation_rollouts__ = numpy.zeros(shape=(rollout_size, num_clients,
                                                            self.Model.Inputs.shape.dims[-1] + 1),
@@ -162,14 +179,19 @@ class PowerTACRolloutHook(PowerTACGameHook):
         self.__cash__.fill(0.0)
 
     def on_step(self, observations, session, **kwargs):
-        if numpy.any(numpy.isnan(observations)):
-            print(self.__rollout_index__)
-            print(numpy.where(numpy.isnan(observations)))
-            print(observations)
-            assert False
+        if self.ModelVersion == self.ExpectedModelVersion:
+            actions = self.__handle_rollout_step__(observations, session, **kwargs)
+        else:
+            actions, _ = super().on_step(observations, session, **kwargs)
 
-        self.Semaphore.acquire()
+        self.__cash__ = numpy.array([observations])[:, :, 0]
 
+        return actions
+
+    def update(self):
+        self.ModelVersion = self.ModelVersion + 1
+
+    def __handle_rollout_step__(self, observations, session, **kwargs):
         rollout_idx = self.__rollout_index__ % self.RolloutSize
         rollout_nidx = rollout_idx + 1
         rollout_pidx = self.RolloutSize - 1 if rollout_idx == 0 else rollout_idx - 1
@@ -181,12 +203,12 @@ class PowerTACRolloutHook(PowerTACGameHook):
         observations = numpy.array([observations])
         value = numpy.array([value])
 
-        cash = observations[:, :, 0]
-        self.__reward_rollouts__[rollout_pidx: rollout_pidx + 1, :] = cash - self.__cash__
-        self.__cash__ = cash
+        self.__reward_rollouts__[rollout_pidx: rollout_pidx + 1, :] = observations[:, :, 0] - self.__cash__
         if self.__rollout_index__ > 0 and rollout_idx == 0:
             reward_mean = numpy.mean(self.__reward_rollouts__, axis=1, keepdims=True)
-            self.__reward_rollouts__ = self.__reward_rollouts__ - reward_mean
+            reward_mean = numpy.maximum(reward_mean, numpy.zeros_like(reward_mean))
+            centralized_reward = self.__reward_rollouts__ - reward_mean
+            self.__reward_rollouts__ = centralized_reward * 2.5e-5
 
             for idx in range(self.ClientCount):
                 self.RecvQueue.put((self.__rollout_states__[:, :, idx: idx + 1, :],
@@ -195,6 +217,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
                                     self.__reward_rollouts__[:, idx: idx + 1],
                                     self.__value_rollouts__[:, idx: idx + 1],
                                     value[:, idx: idx + 1]))
+            self.ExpectedModelVersion = self.ExpectedModelVersion + 1
 
         self.__observation_rollouts__[rollout_idx: rollout_nidx, :, :] = observations
         self.__action_rollouts__[rollout_idx: rollout_nidx, :, :] = numpy.array([actions])

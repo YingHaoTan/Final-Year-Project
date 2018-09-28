@@ -16,7 +16,9 @@ public class AgentConnection implements Closeable {
 	private DataInputStream reader;
 	
 	public AgentConnection(int port) throws UnknownHostException, IOException {
-		socket = new Socket(InetAddress.getLocalHost().getHostName(), port);
+		socket = new Socket(InetAddress.getLoopbackAddress(), port);
+		socket.setTcpNoDelay(true);
+		
 		writer = new DataOutputStream(socket.getOutputStream());
 		reader = new DataInputStream(socket.getInputStream());
 	}

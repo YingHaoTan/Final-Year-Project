@@ -40,12 +40,13 @@ class Server:
     def serve(self, **kwargs):
         buffers = tuple(bytearray(self.Hook.get_observation_structure().size) for _ in range(self.ClientCount))
 
-        self.ServerSocket.bind((socket.gethostname(), self.Port))
+        self.ServerSocket.bind(('127.0.0.1', self.Port))
         self.ServerSocket.listen(self.ClientCount)
         self.Active = True
         while self.Active:
             self.Hook.setup(self, **kwargs)
             clients = [self.ServerSocket.accept()[0] for _ in range(self.ClientCount)]
+            utility.apply(lambda client: client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, True), clients)
             utility.apply(lambda client: client.setblocking(0), clients)
 
             self.Hook.on_start(**kwargs)
@@ -56,7 +57,7 @@ class Server:
                     bviews = [memoryview(buffer) for buffer in buffers]
 
                     while not all(observations):
-                        rsocketlist, _, _ = select.select(uncleared_sockets, [], [])
+                        rsocketlist, _, esocketlist = select.select(uncleared_sockets, [], [], 60)
                         for rsocket in rsocketlist:
                             index = clients.index(rsocket)
                             read_bytes = rsocket.recv_into(bviews[index], len(bviews[index]))
@@ -68,8 +69,9 @@ class Server:
                     uncleared_sockets = [*clients]
                     outputs = [self.Hook.get_output_structure().pack(*output)
                                for output in self.Hook.on_step(observations, **kwargs)]
+
                     while any(outputs):
-                        _, wsocketlist, _ = select.select([], uncleared_sockets, [])
+                        _, wsocketlist, _ = select.select([], uncleared_sockets, [], 60)
                         for wsocket in wsocketlist:
                             index = clients.index(wsocket)
                             write_bytes = wsocket.send(outputs[index])

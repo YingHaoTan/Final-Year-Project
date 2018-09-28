@@ -10,22 +10,31 @@ import org.powertac.extreme.models.MarketState;
 import org.powertac.samplebroker.interfaces.BrokerContext;
 
 public class MarketActor extends Actor<MarketState> {
-	private float[] price;
-	private float[] quantity;
+	
+	private enum MarketAction {
+		NONE, BUY, SELL
+	}
+	
+	private MarketAction[] actions;
+	private double[] price;
+	private double[] quantity;
 	
 	public MarketActor(BrokerContext context) {
 		super(context);
-		this.price = new float[24];
-		this.quantity = new float[24];
+		this.actions = new MarketAction[24];
+		this.price = new double[24];
+		this.quantity = new double[24];
 	}
 
 	@Override
 	public int getSizeInBytes() {
-		return 192;
+		return 288;
 	}
 
 	@Override
 	public void deserialize(ByteBuffer buffer) {
+		for(int i = 0; i < actions.length; i++)
+			actions[i] = MarketAction.values()[(int) buffer.getFloat()];
 		for(int i = 0; i < price.length; i++)
 			price[i] = buffer.getFloat();
 		for(int i = 0; i < quantity.length; i++)
@@ -35,11 +44,20 @@ public class MarketActor extends Actor<MarketState> {
 	@Override
 	public void act(Competition competition, List<Timeslot> enabledTimeslots, MarketState state) {
 		BrokerContext context = this.getContext();
-		for (int i = 0; i < quantity.length; i++) {
-			if (Math.abs(quantity[i]) >= competition.getMinimumOrderQuantity())
-				context.sendMessage(new Order(context.getBroker(), 
-						enabledTimeslots.get(i).getSerialNumber(), 
-						(double) quantity[i] % 0.001, (double) price[i] % 0.01));
+		for (int i = 0; i < actions.length; i++) {
+			double p = price[i];
+			double q = quantity[i];
+			
+			if(actions[i] != MarketAction.NONE && Math.abs(q) >= competition.getMinimumOrderQuantity()) {
+				Order order;
+				
+				if (actions[i] == MarketAction.BUY)
+					order = new Order(context.getBroker(), enabledTimeslots.get(i).getSerialNumber(), q, -p);
+				else
+					order = new Order(context.getBroker(), enabledTimeslots.get(i).getSerialNumber(), -q, p);
+				
+				context.sendMessage(order);
+			}
 		}
 	}
 
