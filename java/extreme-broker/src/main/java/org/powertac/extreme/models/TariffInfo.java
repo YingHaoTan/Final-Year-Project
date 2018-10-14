@@ -9,6 +9,8 @@ public class TariffInfo implements ISerialize {
 	private int subscribers;
 	private double powerusage;
 	private TariffSpecification spec;
+	private double uregfee;
+	private double dregfee;
 	
 	public TariffInfo() {
 		this.subscribers = 0;
@@ -20,8 +22,11 @@ public class TariffInfo implements ISerialize {
 	}
 	
 	public void setTariff(TariffSpecification spec) {
-		if(spec == null || this.spec == null || spec.getPowerType() != this.spec.getPowerType())
+		if(spec == null || this.spec == null || spec.getPowerType() != this.spec.getPowerType()) {
 			this.subscribers = 0;
+			this.uregfee = 0;
+			this.dregfee = 0;
+		}
 		
 		this.spec = spec;
 	}
@@ -38,6 +43,14 @@ public class TariffInfo implements ISerialize {
 		this.powerusage += powerusage;
 	}
 	
+	public void setUpRegulationFee(double uregfee) {
+		this.uregfee = uregfee;
+	}
+	
+	public void setDownRegulationFee(double dregfee) {
+		this.dregfee = dregfee;
+	}
+	
 	public int getSubscribers() {
 		return this.subscribers;
 	}
@@ -52,7 +65,7 @@ public class TariffInfo implements ISerialize {
 
 	@Override
 	public int getSizeInBytes() {
-		return 184;
+		return 196;
 	}
 
 	@Override
@@ -85,6 +98,16 @@ public class TariffInfo implements ISerialize {
 				buffer.putFloat((float) spec.getRates().get(i).getMaxCurtailment());
 			buffer.putFloat((float) spec.getRates().get(TariffConstants.TIME_OF_USE_SLOTS).getValue());
 			buffer.putFloat((float) spec.getRates().get(TariffConstants.TIME_OF_USE_SLOTS).getMaxCurtailment());
+			if(spec.getPowerType().isStorage()) {
+				buffer.putFloat((float) spec.getRegulationRates().get(0).getUpRegulationPayment());
+				buffer.putFloat((float) spec.getRegulationRates().get(0).getDownRegulationPayment());
+			}
+			else {
+				buffer.putFloat(0f);
+				buffer.putFloat(0f);
+			}
+			buffer.putFloat((float) uregfee);
+			buffer.putFloat((float) dregfee);
 			buffer.putFloat((float) spec.getEarlyWithdrawPayment());
 			buffer.putFloat((float) spec.getPeriodicPayment());
 			buffer.putFloat((float) spec.getMinDuration());
@@ -101,6 +124,12 @@ public class TariffInfo implements ISerialize {
 			buffer.putFloat(0f);
 			buffer.putFloat(0f);
 			buffer.putFloat(0f);
+			buffer.putFloat(0f);
+			buffer.putFloat(0f);
+			buffer.putFloat(0f);
+			buffer.putFloat(0f);
 		}
+		
+		this.powerusage = 0;
 	}
 }

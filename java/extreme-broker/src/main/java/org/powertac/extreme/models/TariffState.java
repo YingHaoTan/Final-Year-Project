@@ -28,7 +28,7 @@ public class TariffState implements ISerialize, Initializable {
 	public TariffState() {
 		this.powertypepop = new int[TariffConstants.POWER_TYPE_LIST.size()];
 		this.bootstrapPowerUsage = new float[TariffConstants.POWER_TYPE_LIST.size()];
-		this.tariffinfo = new TariffInfo[TariffConstants.MAX_NUM_TARIFF];
+		this.tariffinfo = new TariffInfo[TariffConstants.NUM_TARIFF_ACTOR * TariffConstants.TARIFF_PER_ACTOR];
 		for(int i = 0; i < this.tariffinfo.length; i++)
 			this.tariffinfo[i] = new TariffInfo();
 	}
@@ -82,8 +82,7 @@ public class TariffState implements ISerialize, Initializable {
 	private TariffInfo getTariffInfo(TariffSpecification spec) {
 		TariffInfo info = null;
 		
-		for(int i = 0; i < TariffConstants.MAX_NUM_TARIFF; i++) {
-			TariffInfo tmp = this.getTariffInfo(i);
+		for(TariffInfo tmp: this.tariffinfo) {
 			TariffSpecification tmpSpec = tmp.getTariff();
 			
 			if(tmpSpec != null && tmpSpec.getId() == spec.getId()) {
@@ -97,10 +96,10 @@ public class TariffState implements ISerialize, Initializable {
 
 	@Override
 	public int getSizeInBytes() {
-		int size =  112;
+		int size =  104;
 		
-		for(int i = 0; i < TariffConstants.MAX_NUM_TARIFF; i++)
-			size = size + this.getTariffInfo(i).getSizeInBytes();
+		for(TariffInfo info: this.tariffinfo)
+			size = size + info.getSizeInBytes();
 		
 		return size;
 	}
@@ -112,8 +111,8 @@ public class TariffState implements ISerialize, Initializable {
 		for(int i = 0; i < this.bootstrapPowerUsage.length; i++)
 			buffer.putFloat(this.bootstrapPowerUsage[i]);
 		
-		for(int i = 0; i < TariffConstants.MAX_NUM_TARIFF; i++)
-			this.getTariffInfo(i).serialize(buffer);
+		for(TariffInfo info: this.tariffinfo)
+			info.serialize(buffer);
 	}
 
 }

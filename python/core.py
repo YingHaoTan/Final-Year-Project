@@ -83,7 +83,8 @@ class PowerTACGameHook(AgentServerHook):
                                                   self.Name],
                                                  cwd=PowerTACGameHook.SCRATCH_BOOTSTRAP_DIR,
                                                  stdin=subprocess.PIPE,
-                                                 stdout=subprocess.PIPE)
+                                                 stdout=subprocess.PIPE,
+                                                 stderr=subprocess.PIPE)
 
         if block:
             self.BootstrapProcess.communicate()
@@ -102,6 +103,7 @@ class PowerTACGameHook(AgentServerHook):
         os.rename(scratch_bootstrap_file, bootstrap_file)
 
         self.CPUSemaphore.acquire()
+        print("Starting %s setup" % self.Name)
 
         self.ServerProcess = subprocess.Popen([*PowerTACGameHook.INTERPRETER_COMMAND,
                                                "server.jar",
@@ -114,7 +116,8 @@ class PowerTACGameHook(AgentServerHook):
                                                broker_identities],
                                               cwd=PowerTACGameHook.EXECUTABLE_DIR,
                                               stdin=subprocess.PIPE,
-                                              stdout=subprocess.PIPE)
+                                              stdout=subprocess.PIPE,
+                                              stderr=subprocess.PIPE)
 
         for index in range(self.ClientCount):
             self.ClientProcesses[index] = subprocess.Popen([*PowerTACGameHook.INTERPRETER_COMMAND,
@@ -169,9 +172,13 @@ class PowerTACRolloutHook(PowerTACGameHook):
                                                dtype=numpy.float32)
         self.__reward_rollouts__ = numpy.zeros(shape=(rollout_size, num_clients), dtype=numpy.float32)
         self.__value_rollouts__ = numpy.zeros(shape=(rollout_size, num_clients), dtype=numpy.float32)
+        self.__neglogp_rollouts__ = numpy.zeros(shape=(rollout_size, num_clients, self.Model.ACTION_COUNT),
+                                                dtype=numpy.float32)
         self.__cash__ = numpy.zeros(shape=(1, num_clients), dtype=numpy.float32)
         self.__rollout_index__ = 0
-        self.StepOp = [self.StepOp, tf.squeeze(self.Model.StateValue, axis=-1)]
+        self.StepOp = [self.StepOp,
+                       tf.squeeze(self.Model.StateValue, axis=-1),
+                       self.Model.Policies.neglogp(self.StepOp)]
 
     def on_start(self, session, **kwargs):
         super().on_start(session, **kwargs)
@@ -182,7 +189,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
         if self.ModelVersion == self.ExpectedModelVersion:
             actions = self.__handle_rollout_step__(observations, session, **kwargs)
         else:
-            actions, _ = super().on_step(observations, session, **kwargs)
+            actions, _, _ = super().on_step(observations, session, **kwargs)
 
         self.__cash__ = numpy.array([observations])[:, :, 0]
 
@@ -198,22 +205,24 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
         if rollout_idx == 0:
             self.__rollout_states__ = numpy.array(session.run(self.InternalState))
-        actions, value = super().on_step(observations, session, **kwargs)
+        actions, value, neglogp = super().on_step(observations, session, **kwargs)
 
         observations = numpy.array([observations])
         value = numpy.array([value])
 
         self.__reward_rollouts__[rollout_pidx: rollout_pidx + 1, :] = observations[:, :, 0] - self.__cash__
         if self.__rollout_index__ > 0 and rollout_idx == 0:
-            reward_mean = numpy.mean(self.__reward_rollouts__, axis=1, keepdims=True)
-            reward_mean = numpy.maximum(reward_mean, numpy.zeros_like(reward_mean))
-            centralized_reward = self.__reward_rollouts__ - reward_mean
-            self.__reward_rollouts__ = centralized_reward * 2.5e-5
+            reward_mean = numpy.maximum(numpy.mean(self.__reward_rollouts__, axis=1, keepdims=True), 0)
+            reward_var = numpy.square(self.__reward_rollouts__ - reward_mean)
+            reward_var = numpy.mean(reward_var, axis=1, keepdims=True)
+            reward_std = numpy.sqrt(reward_var)
+            self.__reward_rollouts__ = (self.__reward_rollouts__ - reward_mean) / reward_std
 
             for idx in range(self.ClientCount):
                 self.RecvQueue.put((self.__rollout_states__[:, :, idx: idx + 1, :],
                                     self.__observation_rollouts__[:, idx: idx + 1, :],
                                     self.__action_rollouts__[:, idx: idx + 1, :],
+                                    self.__neglogp_rollouts__[:, idx: idx + 1, :],
                                     self.__reward_rollouts__[:, idx: idx + 1],
                                     self.__value_rollouts__[:, idx: idx + 1],
                                     value[:, idx: idx + 1]))
@@ -221,6 +230,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
         self.__observation_rollouts__[rollout_idx: rollout_nidx, :, :] = observations
         self.__action_rollouts__[rollout_idx: rollout_nidx, :, :] = numpy.array([actions])
+        self.__neglogp_rollouts__[rollout_idx: rollout_nidx, :, :] = neglogp
         self.__value_rollouts__[rollout_idx: rollout_nidx, :] = value
         self.__rollout_index__ = self.__rollout_index__ + 1
 
