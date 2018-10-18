@@ -35,11 +35,9 @@ Inputs:
     Down regulation rate [345]
     Up regulation BO [346]
     Down regulation BO [347]
-    Early withdrawal penalty [348]
-    Periodic payment [349]
-    Minimum duration [350]
+    Periodic payment [348]
 
-    Same structure as above section x 19 [351 - 1281]
+    Same structure as above section x 19 [349 - 1241]
 
 Outputs:
     Market Outputs:
@@ -53,7 +51,7 @@ Outputs:
         1 category valued policy representing Tariff PowerType
         12 continuous valued policy representing Time Of Use Tariff for each 2 hour timeslot for a day
         12 continuous valued policy representing curtailment ratio for each 2 hour timeslot for a day
-        7 continuous valued policy representing FIXED_RATE, CURTAILMENT_RATIO, UP_REG, DOWN_REG, PP, EWP, MD
+        5 continuous valued policy representing FIXED_RATE, CURTAILMENT_RATIO, UP_REG, DOWN_REG, PP
 
     1 linear output representing V(s)
 """
@@ -68,11 +66,12 @@ import numpy as np
 
 
 def __build_dense__(inputs, num_units, activation=None, initializer=init.orthogonal(),
-                    bias_initializer=init.zeros(), regularizer=clayers.l2_regularizer(1e-4),
+                    bias_initializer=init.zeros(), regularizer=clayers.l2_regularizer((1e-4)),
                     use_layer_norm=False, name="dense"):
     dense = layers.dense(inputs, num_units, activation=None if use_layer_norm else activation,
                          kernel_initializer=initializer, bias_initializer=bias_initializer,
-                         kernel_regularizer=regularizer, name=name)
+                         kernel_regularizer=regularizer,
+                         name=name)
 
     if use_layer_norm:
         dense = clayers.layer_norm(dense,
@@ -164,10 +163,10 @@ class ContinuousPolicy(Policy):
 
     def __init__(self, inputs, num_outputs, scale=1.0, name="ContinuousPolicy"):
         super().__init__(name)
-        self.Alpha = __build_dense__(inputs, num_outputs,
-                                     activation=tf.nn.softplus, regularizer=None, name=name + "_Alpha") + 1
-        self.Beta = __build_dense__(inputs, num_outputs,
-                                    activation=tf.nn.softplus, regularizer=None, name=name + "_Beta") + 1
+        self.Alpha = __build_dense__(inputs, num_outputs, regularizer=None,
+                                     activation=tf.nn.softplus, name=name + "_Alpha") + 1
+        self.Beta = __build_dense__(inputs, num_outputs, regularizer=None,
+                                    activation=tf.nn.softplus, name=name + "_Beta") + 1
         self.Distribution = dist.Beta(self.Alpha, self.Beta)
         self.Scale = scale
 
@@ -181,7 +180,7 @@ class ContinuousPolicy(Policy):
         return self.Distribution.log_prob(x / self.Scale)
 
     def entropy(self):
-        return self.Distribution.entropy()
+        return self.Distribution.entropy() + tf.log(self.Scale)
 
     def sample(self):
         return self.Distribution.sample() * self.Scale
@@ -189,12 +188,11 @@ class ContinuousPolicy(Policy):
 
 class Model:
     NUM_ENABLED_TIMESLOT = 24
-    ACTION_COUNT = 242
-    FEATURE_COUNT = 1281
+    ACTION_COUNT = 232
+    FEATURE_COUNT = 1241
     HIDDEN_STATE_COUNT = 2048
     MARKET_POLICY_STATE_COUNT = 768
     TARIFF_POLICY_STATE_COUNT = 256
-    STATE_EMBEDDING_COUNT = 512
     WEATHER_EMBEDDING_COUNT = 128
     MARKET_EMBEDDING_COUNT = 256
     TARIFF_EMBEDDING_COUNT = 64
@@ -216,7 +214,7 @@ class Model:
 
             embedding = tf.reshape(inputs, [-1, Model.FEATURE_COUNT])
             embedding = tf.split(embedding, [7, 100, 168, 26,
-                                             *([49] * Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS)],
+                                             *([47] * Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS)],
                                  axis=-1)
             weather_embedding = __build_dense__(embedding[1], Model.WEATHER_EMBEDDING_COUNT,
                                                 activation=tf.nn.relu, initializer=init.orthogonal(np.sqrt(2)),
@@ -233,10 +231,6 @@ class Model:
             embedding = tf.concat([embedding[0], weather_embedding, market_embedding, embedding[3], *tariff_embeddings],
                                   axis=-1)
 
-            embedding = __build_dense__(embedding,
-                                        Model.EMBEDDING_COUNT,
-                                        activation=tf.nn.relu, initializer=init.orthogonal(np.sqrt(2)),
-                                        name="HEmbedding")
             embedding = __build_dense__(embedding,
                                         Model.EMBEDDING_COUNT,
                                         activation=tf.nn.relu,
@@ -259,7 +253,7 @@ class Model:
                                             for _ in range(Model.NUM_ENABLED_TIMESLOT)])
             market_prices = ContinuousPolicy(policy_state[0], Model.NUM_ENABLED_TIMESLOT, scale=50.0,
                                              name="MarketPrice")
-            market_quantities = ContinuousPolicy(policy_state[0], Model.NUM_ENABLED_TIMESLOT, scale=5000.0,
+            market_quantities = ContinuousPolicy(policy_state[0], Model.NUM_ENABLED_TIMESLOT, scale=100.0,
                                                  name="MarketQuantity")
             market_policies = GroupedPolicy([market_actions, market_prices, market_quantities], name="MarketPolicy")
 
@@ -281,11 +275,7 @@ class Model:
                                                             ContinuousPolicy(policy_state[idx], 2, scale=50.0,
                                                                              name="REG_%d" % idx),
                                                             ContinuousPolicy(policy_state[idx], 1, scale=5.0,
-                                                                             name="PP_%d" % idx),
-                                                            ContinuousPolicy(policy_state[idx], 1, scale=20.0,
-                                                                             name="EWP_%d" % idx),
-                                                            ContinuousPolicy(policy_state[idx], 1, scale=168.0,
-                                                                             name="MD_%d" % idx)],
+                                                                             name="PP_%d" % idx)],
                                                            name="TariffPolicy_%d" % idx)
                                              for idx in range(1, Model.TARIFF_ACTORS + 1)])
 
@@ -295,13 +285,7 @@ class Model:
             self.PolicyState = policy_state
             self.StateTupleOut = hidden_tuple_out
             self.Policies = GroupedPolicy([market_policies, tariff_policies], name="Policy")
-            self.StateValue = __build_dense__(__build_dense__(hidden_state,
-                                                              Model.STATE_EMBEDDING_COUNT,
-                                                              activation=tf.nn.relu,
-                                                              initializer=init.orthogonal(np.sqrt(2)),
-                                                              name="StateEmbedding"),
-                                              1,
-                                              name="StateValue")
+            self.StateValue = __build_dense__(hidden_state, 1, regularizer=None, name="StateValue")
             self.EvaluationOp = self.Policies.sample()
             self.PredictOp = self.Policies.mode()
 

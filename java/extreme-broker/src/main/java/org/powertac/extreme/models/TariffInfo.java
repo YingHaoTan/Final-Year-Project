@@ -65,7 +65,7 @@ public class TariffInfo implements ISerialize {
 
 	@Override
 	public int getSizeInBytes() {
-		return 196;
+		return 188;
 	}
 
 	@Override
@@ -108,9 +108,7 @@ public class TariffInfo implements ISerialize {
 			}
 			buffer.putFloat((float) uregfee);
 			buffer.putFloat((float) dregfee);
-			buffer.putFloat((float) spec.getEarlyWithdrawPayment());
 			buffer.putFloat((float) spec.getPeriodicPayment());
-			buffer.putFloat((float) spec.getMinDuration());
 		}
 		else {
 			buffer.putFloat(0f);
@@ -119,8 +117,6 @@ public class TariffInfo implements ISerialize {
 				buffer.putFloat(0f);
 			for(int i = 0; i < TariffConstants.TIME_OF_USE_SLOTS; i++)
 				buffer.putFloat(0f);
-			buffer.putFloat(0f);
-			buffer.putFloat(0f);
 			buffer.putFloat(0f);
 			buffer.putFloat(0f);
 			buffer.putFloat(0f);

@@ -35,8 +35,6 @@ public class TariffActor extends Actor<TariffState> {
 	private double up_regulation;
 	private double down_regulation;
 	private double pp;
-	private double ewp;
-	private double md;
 
 	public TariffActor(BrokerContext context, int idx) {
 		super(context);
@@ -59,13 +57,11 @@ public class TariffActor extends Actor<TariffState> {
 		this.up_regulation = buffer.getFloat();
 		this.down_regulation = buffer.getFloat();
 		this.pp = buffer.getFloat();
-		this.ewp = buffer.getFloat();
-		this.md = buffer.getFloat();
 	}
 
 	@Override
 	public int getSizeInBytes() {
-		return 136;
+		return 128;
 	}
 
 	@Override
@@ -100,9 +96,7 @@ public class TariffActor extends Actor<TariffState> {
 			double signnum = this.type.isConsumption()? -1.0: 1.0;
 			
 			TariffSpecification spec = new TariffSpecification(context.getBroker(), this.type)
-					.withPeriodicPayment(signnum * this.pp)
-					.withEarlyWithdrawPayment(-this.ewp)
-					.withMinDuration((long) (this.md));
+					.withPeriodicPayment(signnum * this.pp);
 			List<RateCore> rates = new ArrayList<RateCore>();
 			
 			int begin = 0;

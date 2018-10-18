@@ -6,7 +6,6 @@ import utility
 import queue
 import numpy
 import tensorflow as tf
-import tensorflow.losses as losses
 import scipy.signal as signal
 import os
 
@@ -70,16 +69,19 @@ cmodel = model.Model(d_obs[:, :, 1:], tf.unstack(d_state, 2))
 
 global_step = tf.train.create_global_step()
 d_adv = tf.expand_dims(d_adv, axis=1)
-prob_ratio = tf.exp(tf.reduce_sum(d_neglogp - cmodel.Policies.neglogp(d_action), axis=-1))
+prob_ratio = d_neglogp - cmodel.Policies.neglogp(d_action)
+clipped_prob_ratio = tf.clip_by_value(prob_ratio, tf.log(1 - PPO_EPSILON), tf.log(1 + PPO_EPSILON))
+prob_ratio = tf.exp(tf.reduce_sum(prob_ratio, axis=-1))
+clipped_prob_ratio = tf.clip_by_value(tf.exp(tf.reduce_sum(clipped_prob_ratio, axis=-1)),
+                                      1 - PPO_EPSILON,
+                                      1 + PPO_EPSILON)
 policy_loss = -tf.reduce_mean(tf.minimum(prob_ratio * d_adv,
-                                         tf.clip_by_value(prob_ratio,
-                                                          1 - PPO_EPSILON,
-                                                          1 + PPO_EPSILON) * d_adv))
+                                         clipped_prob_ratio * d_adv))
 value_prediction = tf.squeeze(cmodel.StateValue, axis=1)
 value_loss = 0.5 * tf.reduce_mean((value_prediction - d_reward) ** 2)
 entropy_loss = 0.01 * tf.reduce_mean(cmodel.Policies.entropy())
-regularization_loss = losses.get_regularization_loss()
-loss = regularization_loss + policy_loss + value_loss - entropy_loss
+regularization_loss = tf.losses.get_regularization_loss()
+loss = policy_loss + value_loss + regularization_loss - entropy_loss
 
 lr = tf.train.polynomial_decay(INITIAL_LR, global_step, MAX_EPOCHS * NUM_MINIBATCH, FINAL_LR)
 optimizer = tf.train.RMSPropOptimizer(lr)
@@ -87,6 +89,9 @@ grads = tf.gradients(loss, cmodel.variables)
 clipped_grads, global_norm = tf.clip_by_global_norm([tf.identity(grad) for grad in grads], 100.0)
 grads_n_vars = zip(clipped_grads, cmodel.variables)
 train_op = optimizer.apply_gradients(grads_n_vars, global_step=global_step)
+mode_probability_op = tf.reduce_mean(tf.exp(-tf.reduce_sum(tf.cast(cmodel.Policies.neglogp(cmodel.PredictOp),
+                                                                   tf.float64),
+                                                           axis=-1)))
 
 tf.summary.scalar("Advantages", tf.reduce_mean(d_sadv))
 tf.summary.scalar("GNorm", global_norm)
@@ -108,10 +113,17 @@ with tf.name_scope("Gradients"):
 with tf.name_scope("Reward"):
     tf.summary.histogram("Actual", d_reward)
     tf.summary.histogram("Predicted", cmodel.StateValue)
-with tf.name_scope("PRatio"):
-    tf.summary.scalar("Max", tf.reduce_max(prob_ratio))
-    tf.summary.scalar("Mean", tf.reduce_mean(prob_ratio))
-    tf.summary.scalar("Min", tf.reduce_min(prob_ratio))
+with tf.name_scope("ProbabilityRatio"):
+    with tf.name_scope("Unclipped"):
+        tf.summary.scalar("Max", tf.reduce_max(prob_ratio))
+        tf.summary.scalar("Mean", tf.reduce_mean(prob_ratio))
+        tf.summary.scalar("Min", tf.reduce_min(prob_ratio))
+    with tf.name_scope("Clipped"):
+        tf.summary.scalar("Max", tf.reduce_max(clipped_prob_ratio))
+        tf.summary.scalar("Mean", tf.reduce_mean(clipped_prob_ratio))
+        tf.summary.scalar("Min", tf.reduce_min(clipped_prob_ratio))
+tf.summary.scalar("ModeProbability", mode_probability_op)
+
 
 summary_op = tf.summary.merge_all()
 
@@ -154,6 +166,7 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
 
     rollout_idx = (rollout_idx + 1) % BUFFER_SIZE
     if rollout_idx == 0:
+        CPU_SEMAPHORE.acquire()
         nvalues = numpy.concatenate([value_buffer[:, 1:], nv_buffer], axis=1)
         delta = reward_buffer + gamma(step_count) * nvalues - value_buffer
         delta = numpy.transpose(numpy.transpose(delta)[::-1])
@@ -173,17 +186,19 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
         data_present = True
         while data_present:
             try:
-                _, summary_value, step_count = sess.run([train_op, summary_op, global_step])
+                _, mode_prob, summary_value, step_count = sess.run([train_op, mode_probability_op,
+                                                                    summary_op, global_step])
             except tf.errors.OutOfRangeError:
                 saver.save(sess, CHECKPOINT_PREFIX, global_step=step_count)
                 summary_writer.add_summary(summary_value, global_step=step_count)
 
                 update_idx = step_count // (NUM_EPOCHS * NUM_MINIBATCH)
-                print("Update %d completed, synchronizing variables" % update_idx)
+                print("Update %d completed, average mode probability: %f" % (update_idx, mode_prob))
 
                 utility.apply(lambda hook: hook.update(), map(lambda server: server.Hook, servers))
                 data_present = False
 
+        CPU_SEMAPHORE.release()
         if step_count > MAX_EPOCHS * NUM_MINIBATCH:
             print("Completed training process, terminating session")
             utility.apply(lambda server: server.stop(), servers)

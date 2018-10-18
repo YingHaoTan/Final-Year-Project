@@ -149,6 +149,7 @@ class PowerTACGameHook(AgentServerHook):
         if self.SemaphoreAcquired:
             self.CPUSemaphore.release()
             self.SemaphoreAcquired = False
+            print("%s: Semaphore released" % self.Name)
 
 
 class PowerTACRolloutHook(PowerTACGameHook):
@@ -212,10 +213,11 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
         self.__reward_rollouts__[rollout_pidx: rollout_pidx + 1, :] = observations[:, :, 0] - self.__cash__
         if self.__rollout_index__ > 0 and rollout_idx == 0:
-            reward_mean = numpy.maximum(numpy.mean(self.__reward_rollouts__, axis=1, keepdims=True), 0)
+            reward_mean = numpy.mean(self.__reward_rollouts__, axis=1, keepdims=True)
             reward_var = numpy.square(self.__reward_rollouts__ - reward_mean)
             reward_var = numpy.mean(reward_var, axis=1, keepdims=True)
             reward_std = numpy.sqrt(reward_var)
+            reward_std = numpy.where(reward_std > 0, reward_std, numpy.ones_like(reward_std))
             self.__reward_rollouts__ = (self.__reward_rollouts__ - reward_mean) / reward_std
 
             for idx in range(self.ClientCount):
