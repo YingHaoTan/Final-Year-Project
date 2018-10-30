@@ -156,6 +156,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
     def __init__(self, model_builder_fn, num_clients: int, powertac_port: int,
                  cpu_semaphore: threading.BoundedSemaphore, rollout_size: int, recv_queue: queue.Queue,
+                 objective_shift_phase_op,
                  name="PowerTACRolloutHook"):
         super().__init__(model_builder_fn, num_clients, powertac_port, cpu_semaphore, name)
 
@@ -163,6 +164,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
         self.ExpectedModelVersion = 0
         self.RolloutSize = rollout_size
         self.RecvQueue = recv_queue
+        self.__objective_shift_phase_op__ = objective_shift_phase_op
         self.__rollout_states__ = None
         self.__observation_rollouts__ = numpy.zeros(shape=(rollout_size, num_clients,
                                                            self.Model.Inputs.shape.dims[-1] + 1),
@@ -173,13 +175,14 @@ class PowerTACRolloutHook(PowerTACGameHook):
                                                dtype=numpy.float32)
         self.__reward_rollouts__ = numpy.zeros(shape=(rollout_size, num_clients), dtype=numpy.float32)
         self.__value_rollouts__ = numpy.zeros(shape=(rollout_size, num_clients), dtype=numpy.float32)
-        self.__neglogp_rollouts__ = numpy.zeros(shape=(rollout_size, num_clients, self.Model.ACTION_COUNT),
-                                                dtype=numpy.float32)
+        self.__log_prob_rollouts__ = numpy.zeros(shape=(rollout_size, num_clients, self.Model.ACTION_COUNT),
+                                                 dtype=numpy.float32)
         self.__cash__ = numpy.zeros(shape=(1, num_clients), dtype=numpy.float32)
         self.__rollout_index__ = 0
         self.StepOp = [self.StepOp,
                        tf.squeeze(self.Model.StateValue, axis=-1),
-                       self.Model.Policies.neglogp(self.StepOp)]
+                       self.Model.Policies.log_prob(self.StepOp),
+                       self.__objective_shift_phase_op__]
 
     def on_start(self, session, **kwargs):
         super().on_start(session, **kwargs)
@@ -190,7 +193,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
         if self.ModelVersion == self.ExpectedModelVersion:
             actions = self.__handle_rollout_step__(observations, session, **kwargs)
         else:
-            actions, _, _ = super().on_step(observations, session, **kwargs)
+            actions, _, _, _ = super().on_step(observations, session, **kwargs)
 
         self.__cash__ = numpy.array([observations])[:, :, 0]
 
@@ -206,25 +209,35 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
         if rollout_idx == 0:
             self.__rollout_states__ = numpy.array(session.run(self.InternalState))
-        actions, value, neglogp = super().on_step(observations, session, **kwargs)
+        actions, value, log_prob, objective_shift = super().on_step(observations, session, **kwargs)
 
         observations = numpy.array([observations])
         value = numpy.array([value])
 
         self.__reward_rollouts__[rollout_pidx: rollout_pidx + 1, :] = observations[:, :, 0] - self.__cash__
         if self.__rollout_index__ > 0 and rollout_idx == 0:
-            reward_mean = numpy.mean(self.__reward_rollouts__, axis=1, keepdims=True)
-            reward_var = numpy.square(self.__reward_rollouts__ - reward_mean)
+            print("%s submitting rollout for model update %d" % (self.Name, self.ExpectedModelVersion))
+            reward_var = numpy.square(self.__reward_rollouts__)
             reward_var = numpy.mean(reward_var, axis=1, keepdims=True)
             reward_std = numpy.sqrt(reward_var)
             reward_std = numpy.where(reward_std > 0, reward_std, numpy.ones_like(reward_std))
-            self.__reward_rollouts__ = (self.__reward_rollouts__ - reward_mean) / reward_std
+            objective_profit = self.__reward_rollouts__ / reward_std
+            objective_profit = (1 - objective_shift) * objective_profit
+
+            reward_var = numpy.square(numpy.mean(self.__reward_rollouts__, axis=1, keepdims=True))
+            reward_var = numpy.mean(reward_var, axis=1, keepdims=True)
+            reward_std = numpy.sqrt(reward_var)
+            reward_std = numpy.where(reward_std > 0, reward_std, numpy.ones_like(reward_std))
+            objective_compete = (self.__reward_rollouts__ - numpy.mean(self.__reward_rollouts__)) / reward_std
+            objective_compete = objective_shift * objective_compete
+
+            self.__reward_rollouts__ = objective_profit + objective_compete
 
             for idx in range(self.ClientCount):
                 self.RecvQueue.put((self.__rollout_states__[:, :, idx: idx + 1, :],
                                     self.__observation_rollouts__[:, idx: idx + 1, :],
                                     self.__action_rollouts__[:, idx: idx + 1, :],
-                                    self.__neglogp_rollouts__[:, idx: idx + 1, :],
+                                    self.__log_prob_rollouts__[:, idx: idx + 1, :],
                                     self.__reward_rollouts__[:, idx: idx + 1],
                                     self.__value_rollouts__[:, idx: idx + 1],
                                     value[:, idx: idx + 1]))
@@ -232,7 +245,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
         self.__observation_rollouts__[rollout_idx: rollout_nidx, :, :] = observations
         self.__action_rollouts__[rollout_idx: rollout_nidx, :, :] = numpy.array([actions])
-        self.__neglogp_rollouts__[rollout_idx: rollout_nidx, :, :] = neglogp
+        self.__log_prob_rollouts__[rollout_idx: rollout_nidx, :, :] = log_prob
         self.__value_rollouts__[rollout_idx: rollout_nidx, :] = value
         self.__rollout_index__ = self.__rollout_index__ + 1
 
