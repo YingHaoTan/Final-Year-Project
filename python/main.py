@@ -6,7 +6,6 @@ import utility
 import queue
 import numpy
 import tensorflow as tf
-import scipy.signal as signal
 import os
 
 SUMMARY_DIR = "summary"
@@ -19,10 +18,10 @@ ROLLOUT_STEPS = 168
 BUFFER_SIZE = 48
 NUM_MINIBATCH = 3
 NUM_EPOCHS = 4
-MAX_EPOCHS = 100000 * NUM_EPOCHS
-MAX_PHASE = 10000 * NUM_EPOCHS
+MAX_EPOCHS = 5000 * NUM_EPOCHS
+MAX_PHASE = 1000 * NUM_EPOCHS
 INITIAL_LR = 1e-4
-FINAL_LR = 1e-6
+FINAL_LR = 1e-5
 
 NUM_CLIENTS = [4] * 12
 LAMBDA = 0.95
@@ -31,7 +30,7 @@ CPU_SEMAPHORE = threading.BoundedSemaphore(1)
 
 
 def gamma(step):
-    return 0.995 + 0.0046 * (step / (MAX_PHASE * NUM_MINIBATCH))
+    return 0.995 + 0.0046 * min(step / (MAX_PHASE * NUM_MINIBATCH), 1.0)
 
 
 print("Setting up trainer to perform %d training epochs" % MAX_EPOCHS)
@@ -82,7 +81,7 @@ entropy_loss = 0.01 * tf.reduce_mean(cmodel.Policies.entropy())
 loss = policy_loss + value_loss - entropy_loss
 
 lr = tf.train.polynomial_decay(INITIAL_LR, global_step, MAX_EPOCHS * NUM_MINIBATCH, FINAL_LR)
-optimizer = tf.train.RMSPropOptimizer(lr, decay=0.99, momentum=0.9, centered=True)
+optimizer = tf.train.RMSPropOptimizer(lr, decay=0.99, centered=True)
 grads = tf.gradients(loss, cmodel.variables)
 clipped_grads, global_norm = tf.clip_by_global_norm([tf.identity(grad) for grad in grads], 50.0)
 grads_n_vars = zip(clipped_grads, cmodel.variables)
@@ -120,6 +119,7 @@ servers = [server.Server(NUM_CLIENTS[idx], PORT + idx,
 sess = tf.Session()
 
 sess.run(tf.global_variables_initializer())
+saver.restore(sess, tf.train.latest_checkpoint(CHECKPOINT_DIR))
 
 server_threads = [threading.Thread(target=server.serve, kwargs={"session": sess}) for server in servers]
 utility.apply(lambda thread: thread.start(), server_threads)
@@ -155,10 +155,13 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
         if stats_count > 0:
             nvalues = numpy.concatenate([value_buffer[:, 1:], nv_buffer], axis=1)
             delta = reward_buffer + gamma(step_count) * nvalues - value_buffer
-            delta = numpy.transpose(numpy.transpose(delta)[::-1])
-            delta = signal.lfilter([1], [1, -gamma(step_count) * LAMBDA], x=delta)
 
-            advantages = numpy.transpose(numpy.transpose(delta)[::-1])
+            gae_factor = gamma(step_count) * LAMBDA
+            delta[:, -2:-1] = delta[:, -2:-1] + gae_factor * delta[:, -1:]
+            for idx in range(delta.shape[-1] - 2):
+                delta[:, -idx-3:-idx-2] = delta[:, -idx-3:-idx-2] + gae_factor * delta[:, -idx-2:-idx-1]
+
+            advantages = delta
             rewards = delta + value_buffer
 
             sess.run([d_iterator.initializer, d_summaryiterator.initializer],

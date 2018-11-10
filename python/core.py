@@ -216,7 +216,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
         self.__reward_rollouts__[rollout_pidx: rollout_pidx + 1, :] = observations[:, :, 0] - self.__cash__
         if self.__rollout_index__ > 0 and rollout_idx == 0:
-            print("%s submitting rollout for model update %d" % (self.Name, self.ExpectedModelVersion))
+            print("%s submitting rollout for model update %d" % (self.Name, self.ExpectedModelVersion - 1))
             reward_var = numpy.square(self.__reward_rollouts__)
             reward_var = numpy.mean(reward_var, axis=1, keepdims=True)
             reward_std = numpy.sqrt(reward_var)
@@ -224,11 +224,12 @@ class PowerTACRolloutHook(PowerTACGameHook):
             objective_profit = self.__reward_rollouts__ / reward_std
             objective_profit = (1 - objective_shift) * objective_profit
 
-            reward_var = numpy.square(numpy.mean(self.__reward_rollouts__, axis=1, keepdims=True))
+            reward_mean = numpy.mean(self.__reward_rollouts__, axis=1, keepdims=True)
+            reward_var = numpy.square(self.__reward_rollouts__ - reward_mean)
             reward_var = numpy.mean(reward_var, axis=1, keepdims=True)
             reward_std = numpy.sqrt(reward_var)
             reward_std = numpy.where(reward_std > 0, reward_std, numpy.ones_like(reward_std))
-            objective_compete = (self.__reward_rollouts__ - numpy.mean(self.__reward_rollouts__)) / reward_std
+            objective_compete = (self.__reward_rollouts__ - reward_mean) / reward_std
             objective_compete = objective_shift * objective_compete
 
             self.__reward_rollouts__ = objective_profit + objective_compete
