@@ -27,17 +27,17 @@ Inputs:
     Tariff PowerType category [302 - 315]
     Total number of subscribers for tariff [316]
     Average power usage per customer for tariff in the previous timeslot [317]
-    Time of use rate [318 - 329]
-    Time of use maximum curtailment value [330 - 341]
-    Tariff fixed rate [342]
-    Fixed rate maximum curtailment value [343]
-    Up regulation rate [344]
-    Down regulation rate [345]
-    Up regulation BO [346]
-    Down regulation BO [347]
-    Periodic payment [348]
+    Time of use rate [318 - 323]
+    Time of use maximum curtailment value [324 - 329]
+    Tariff fixed rate [330]
+    Fixed rate maximum curtailment value [331]
+    Up regulation rate [332]
+    Down regulation rate [333]
+    Up regulation BO [334]
+    Down regulation BO [335]
+    Periodic payment [336]
 
-    Same structure as above section x 19 [349 - 1241]
+    Same structure as above section x 19 [337 - 1001]
 
 Outputs:
     Market Outputs:
@@ -49,8 +49,8 @@ Outputs:
         1 category valued policy representing Tariff Number
         1 category valued policy representing None, Revoke, UP_REG_BO, DOWN_REG_BO, Activate
         1 category valued policy representing Tariff PowerType
-        12 continuous valued policy representing Time Of Use Tariff for each 2 hour timeslot for a day
-        12 continuous valued policy representing curtailment ratio for each 2 hour timeslot for a day
+        6 continuous valued policy representing Time Of Use Tariff for each 4 hour timeslot for a day
+        6 continuous valued policy representing curtailment ratio for each 4 hour timeslot for a day
         5 continuous valued policy representing FIXED_RATE, CURTAILMENT_RATIO, UP_REG, DOWN_REG, PP
 
     1 linear output representing V(s)
@@ -237,8 +237,8 @@ class RunningStatistics:
 
 class Model:
     NUM_ENABLED_TIMESLOT = 24
-    ACTION_COUNT = 232
-    FEATURE_COUNT = 1241
+    ACTION_COUNT = 172
+    FEATURE_COUNT = 1001
     HIDDEN_STATE_COUNT = 2048
     MARKET_COV_STATE_COUNT = 512
     TARIFF_COV_STATE_COUNT = 128
@@ -265,7 +265,7 @@ class Model:
             embedding = tf.reshape(inputs, [-1, Model.FEATURE_COUNT])
             embedding = running_stats(embedding)
             embedding = tf.split(embedding, [7, 100, 168, 26,
-                                             *([47] * Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS)],
+                                             *([35] * Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS)],
                                  axis=-1)
             weather_embedding = __build_embedding__(tf.concat([embedding[0], embedding[1]], axis=-1),
                                                     Model.WEATHER_EMBEDDING_COUNT,
@@ -317,9 +317,9 @@ class Model:
                                                                               name="TariffAction_%d" % idx),
                                                             CategoricalPolicy(hidden_state, 13,
                                                                               name="PowerType_%d" % idx),
-                                                            ContinuousPolicy(cov_state[idx], 12, scale=0.25,
+                                                            ContinuousPolicy(cov_state[idx], 6, scale=0.25,
                                                                              name="VF_%d" % idx),
-                                                            ContinuousPolicy(cov_state[idx], 12,
+                                                            ContinuousPolicy(cov_state[idx], 6,
                                                                              name="VR_%d" % idx),
                                                             ContinuousPolicy(cov_state[idx], 1, scale=0.25,
                                                                              name="FF_%d" % idx),
@@ -346,6 +346,13 @@ class Model:
     @property
     def variables(self):
         return tf.trainable_variables(self.Name)
+
+    @staticmethod
+    def create_transfer_op(srcmodel, dstmodel):
+        srcvars = tf.trainable_variables(srcmodel.Name)
+        dstvars = tf.trainable_variables(dstmodel.Name)
+
+        return tuple(tf.assign(dstvars[idx], srcvars[idx]) for idx in range(len(srcvars)))
 
     @staticmethod
     def state_shapes(batch_size):

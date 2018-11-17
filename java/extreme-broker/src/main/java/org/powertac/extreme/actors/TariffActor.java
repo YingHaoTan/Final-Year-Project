@@ -61,7 +61,7 @@ public class TariffActor extends Actor<TariffState> {
 
 	@Override
 	public int getSizeInBytes() {
-		return 128;
+		return 80;
 	}
 
 	@Override

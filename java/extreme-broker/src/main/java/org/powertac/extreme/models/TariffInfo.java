@@ -65,7 +65,7 @@ public class TariffInfo implements ISerialize {
 
 	@Override
 	public int getSizeInBytes() {
-		return 188;
+		return 140;
 	}
 
 	@Override

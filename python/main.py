@@ -7,17 +7,19 @@ import queue
 import numpy
 import tensorflow as tf
 import os
+import random
 
 SUMMARY_DIR = "summary"
 CHECKPOINT_DIR = "ckpt"
 CHECKPOINT_PREFIX = os.path.join(CHECKPOINT_DIR, "model")
-PPO_EPSILON = 0.2
+INITIAL_PPO_EPSILON = 0.3
+FINAL_PPO_EPSILON = 0.2
 PORT = 61000
 PT_PORT = 60000
 ROLLOUT_STEPS = 168
-BUFFER_SIZE = 48
-NUM_MINIBATCH = 3
-NUM_EPOCHS = 4
+BUFFER_SIZE = 36
+NUM_MINIBATCH = 2
+NUM_EPOCHS = 8
 MAX_EPOCHS = 5000 * NUM_EPOCHS
 MAX_PHASE = 1000 * NUM_EPOCHS
 INITIAL_LR = 1e-4
@@ -27,10 +29,6 @@ NUM_CLIENTS = [4] * 12
 LAMBDA = 0.95
 ROLLOUT_QUEUE = queue.Queue()
 CPU_SEMAPHORE = threading.BoundedSemaphore(1)
-
-
-def gamma(step):
-    return 0.995 + 0.0046 * min(step / (MAX_PHASE * NUM_MINIBATCH), 1.0)
 
 
 print("Setting up trainer to perform %d training epochs" % MAX_EPOCHS)
@@ -65,25 +63,32 @@ dataset = dataset.repeat(NUM_EPOCHS * NUM_MINIBATCH)
 d_summaryiterator = dataset.make_initializable_iterator()
 d_cash, d_sadv = d_summaryiterator.get_next()
 
+alt_model = model.Model(d_obs[:, :, 1:], tf.unstack(d_state, 2), name='AlternateModel')
 cmodel = model.Model(d_obs[:, :, 1:], tf.unstack(d_state, 2))
 
+transfer_op = model.Model.create_transfer_op(cmodel, alt_model)
 global_step = tf.train.create_global_step()
-objective_shift_op = tf.minimum(global_step / (MAX_PHASE * NUM_MINIBATCH), 1.0)
+objective_shift_op = tf.cast(tf.minimum(global_step / (MAX_PHASE * NUM_MINIBATCH), 1.0), tf.float32)
+gamma_op = 0.995 + 0.0046 * objective_shift_op
 
+clip_range = INITIAL_PPO_EPSILON + (FINAL_PPO_EPSILON - INITIAL_PPO_EPSILON) * objective_shift_op
 d_adv = tf.expand_dims(d_adv, axis=1)
 prob_ratio = tf.exp(tf.reduce_sum(cmodel.Policies.log_prob(d_action) - d_log_prob, axis=-1))
-clipped_prob_ratio = tf.clip_by_value(prob_ratio, 1 - PPO_EPSILON, 1 + PPO_EPSILON)
+clipped_prob_ratio = tf.clip_by_value(prob_ratio, 1 - clip_range, 1 + clip_range)
 policy_loss = -tf.reduce_mean(tf.minimum(prob_ratio * d_adv,
                                          clipped_prob_ratio * d_adv))
 value_prediction = tf.squeeze(cmodel.StateValue, axis=1)
 value_loss = 0.5 * tf.reduce_mean((value_prediction - d_reward) ** 2)
-entropy_loss = 0.01 * tf.reduce_mean(cmodel.Policies.entropy())
+entropy_loss = 0.005 * tf.reduce_mean(cmodel.Policies.entropy())
 loss = policy_loss + value_loss - entropy_loss
 
-lr = tf.train.polynomial_decay(INITIAL_LR, global_step, MAX_EPOCHS * NUM_MINIBATCH, FINAL_LR)
+warmup_steps = NUM_MINIBATCH * NUM_EPOCHS
+warmup_lr = tf.train.polynomial_decay(0.0, global_step, warmup_steps, INITIAL_LR)
+lr = tf.train.polynomial_decay(INITIAL_LR, global_step - warmup_steps, MAX_EPOCHS * NUM_MINIBATCH, FINAL_LR)
+lr = tf.cond(global_step < warmup_steps, lambda: warmup_lr, lambda: lr)
 optimizer = tf.train.RMSPropOptimizer(lr, decay=0.99, centered=True)
 grads = tf.gradients(loss, cmodel.variables)
-clipped_grads, global_norm = tf.clip_by_global_norm([tf.identity(grad) for grad in grads], 50.0)
+clipped_grads, global_norm = tf.clip_by_global_norm([tf.identity(grad) for grad in grads], 30.0)
 grads_n_vars = zip(clipped_grads, cmodel.variables)
 train_op = optimizer.apply_gradients(grads_n_vars, global_step=global_step)
 
@@ -101,6 +106,7 @@ with tf.name_scope("Gradients"):
 with tf.name_scope("Reward"):
     tf.summary.histogram("Actual", d_reward)
     tf.summary.histogram("Predicted", cmodel.StateValue)
+    tf.summary.scalar("MaximumCash", tf.reduce_max(d_cash))
 with tf.name_scope("ProbabilityRatio"):
     tf.summary.histogram("Clipped", clipped_prob_ratio)
 
@@ -112,14 +118,15 @@ summary_writer = tf.summary.FileWriter(SUMMARY_DIR, graph=tf.get_default_graph()
 
 servers = [server.Server(NUM_CLIENTS[idx], PORT + idx,
                          core.PowerTACRolloutHook(model.Model, NUM_CLIENTS[idx], PT_PORT + idx,
-                                                  CPU_SEMAPHORE, ROLLOUT_STEPS, ROLLOUT_QUEUE, objective_shift_op,
+                                                  CPU_SEMAPHORE, ROLLOUT_STEPS, ROLLOUT_QUEUE,
+                                                  alt_model.Name, objective_shift_op, gamma_op, LAMBDA,
                                                   name="Game%02d" % idx))
            for idx in range(len(NUM_CLIENTS))]
 
 sess = tf.Session()
 
 sess.run(tf.global_variables_initializer())
-saver.restore(sess, tf.train.latest_checkpoint(CHECKPOINT_DIR))
+sess.run(transfer_op)
 
 server_threads = [threading.Thread(target=server.serve, kwargs={"session": sess}) for server in servers]
 utility.apply(lambda thread: thread.start(), server_threads)
@@ -133,7 +140,6 @@ action_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS, model.Model.ACTIO
 log_prob_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS, model.Model.ACTION_COUNT), dtype=numpy.float32)
 reward_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=numpy.float32)
 value_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=numpy.float32)
-nv_buffer = numpy.zeros(shape=(BUFFER_SIZE, 1), dtype=numpy.float32)
 rollout_idx = 0
 step_count = sess.run(global_step)
 
@@ -144,56 +150,49 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
     log_prob_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[3], (1, 0, 2))
     reward_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[4], (1, 0))
     value_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[5], (1, 0))
-    nv_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[6], (1, 0))
 
     rollout_idx = (rollout_idx + 1) % BUFFER_SIZE
     if rollout_idx == 0:
-        CPU_SEMAPHORE.acquire()
         stats_count = sess.run(cmodel.RunningStats.Count)
 
         print("Running Statistics Count: %d" % stats_count)
-        if stats_count > 0:
-            nvalues = numpy.concatenate([value_buffer[:, 1:], nv_buffer], axis=1)
-            delta = reward_buffer + gamma(step_count) * nvalues - value_buffer
+        with CPU_SEMAPHORE:
+            if stats_count == 0:
+                utility.apply(lambda server: server.reset(), servers)
+            else:
+                sess.run([d_iterator.initializer, d_summaryiterator.initializer],
+                         feed_dict={state_placeholder: state_buffer,
+                                    obs_placeholder: observation_buffer,
+                                    action_placeholder: action_buffer,
+                                    log_prob_placeholder: log_prob_buffer,
+                                    reward_placeholder: value_buffer,
+                                    advantage_placeholder: reward_buffer})
+                summary_value = None
+                data_present = True
+                mode_prob = 0
+                while data_present:
+                    try:
+                        _, summary_value, step_count = sess.run([train_op, summary_op, global_step])
+                    except tf.errors.OutOfRangeError:
+                        saver.save(sess, CHECKPOINT_PREFIX, global_step=step_count)
+                        summary_writer.add_summary(summary_value, global_step=step_count)
 
-            gae_factor = gamma(step_count) * LAMBDA
-            delta[:, -2:-1] = delta[:, -2:-1] + gae_factor * delta[:, -1:]
-            for idx in range(delta.shape[-1] - 2):
-                delta[:, -idx-3:-idx-2] = delta[:, -idx-3:-idx-2] + gae_factor * delta[:, -idx-2:-idx-1]
+                        update_idx = step_count // (NUM_EPOCHS * NUM_MINIBATCH)
+                        print("Update %d completed" % update_idx)
 
-            advantages = delta
-            rewards = delta + value_buffer
+                        data_present = False
 
-            sess.run([d_iterator.initializer, d_summaryiterator.initializer],
-                     feed_dict={state_placeholder: state_buffer,
-                                obs_placeholder: observation_buffer,
-                                action_placeholder: action_buffer,
-                                log_prob_placeholder: log_prob_buffer,
-                                reward_placeholder: rewards,
-                                advantage_placeholder: advantages})
-            summary_value = None
-            data_present = True
-            mode_prob = 0
-            while data_present:
-                try:
-                    _, summary_value, step_count = sess.run([train_op, summary_op, global_step])
-                except tf.errors.OutOfRangeError:
-                    saver.save(sess, CHECKPOINT_PREFIX, global_step=step_count)
-                    summary_writer.add_summary(summary_value, global_step=step_count)
+            stats_obs_buffer = numpy.reshape(observation_buffer[:, :, 1:], (-1, model.Model.FEATURE_COUNT))
+            sess.run(cmodel.RunningStats.UpdateStatsOp,
+                     feed_dict={cmodel.RunningStats.MeanInput: stats_obs_buffer.mean(axis=0, keepdims=True),
+                                cmodel.RunningStats.VarInput: stats_obs_buffer.var(axis=0, keepdims=True),
+                                cmodel.RunningStats.CountInput: stats_obs_buffer.shape[0]})
 
-                    update_idx = step_count // (NUM_EPOCHS * NUM_MINIBATCH)
-                    print("Update %d completed" % update_idx)
-
-                    data_present = False
-
-        stats_obs_buffer = numpy.reshape(observation_buffer[:, :, 1:], (-1, model.Model.FEATURE_COUNT))
-        sess.run(cmodel.RunningStats.UpdateStatsOp,
-                 feed_dict={cmodel.RunningStats.MeanInput: stats_obs_buffer.mean(axis=0, keepdims=True),
-                            cmodel.RunningStats.VarInput: stats_obs_buffer.var(axis=0, keepdims=True),
-                            cmodel.RunningStats.CountInput: stats_obs_buffer.shape[0]})
-
-        utility.apply(lambda hook: hook.update(), map(lambda server: server.Hook, servers))
-        CPU_SEMAPHORE.release()
+            if stats_count > 0:
+                utility.apply(lambda hook: hook.update(), map(lambda server: server.Hook, servers))
+                if random.random() < 0.05:
+                    sess.run(transfer_op)
+                    print("Transferred parameters to alternate model")
         if step_count > MAX_EPOCHS * NUM_MINIBATCH:
             print("Completed training process, terminating session")
             utility.apply(lambda server: server.stop(), servers)

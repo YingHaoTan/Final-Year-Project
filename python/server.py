@@ -4,6 +4,10 @@ import select
 import utility
 
 
+class ServerResetException(Exception):
+    pass
+
+
 class ServerHook:
 
     def get_observation_structure(self) -> struct.Struct:
@@ -24,6 +28,9 @@ class ServerHook:
     def on_stop(self, **kwargs):
         raise NotImplementedError("on_stop method is not implemented")
 
+    def on_reset(self):
+        raise NotImplementedError("on_stop method is not implemented")
+
 
 class Server:
 
@@ -33,9 +40,13 @@ class Server:
         self.Hook = hook
         self.ServerSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.Active = False
+        self.Reset = False
 
     def stop(self):
         self.Active = False
+
+    def reset(self):
+        self.Reset = True
 
     def serve(self, **kwargs):
         buffers = tuple(bytearray(self.Hook.get_observation_structure().size) for _ in range(self.ClientCount))
@@ -52,6 +63,9 @@ class Server:
             self.Hook.on_start(**kwargs)
             try:
                 while self.Active:
+                    if self.Reset:
+                        raise ServerResetException('Server raised a reset flag')
+
                     uncleared_sockets = [*clients]
                     observations = [None] * self.ClientCount
                     bviews = [memoryview(buffer) for buffer in buffers]
@@ -79,7 +93,10 @@ class Server:
                             if len(outputs[index]) == 0:
                                 uncleared_sockets.remove(wsocket)
                                 outputs[index] = None
-            except ConnectionResetError:
+            except (ConnectionResetError, ServerResetException) as e:
+                if isinstance(e, ServerResetException):
+                    self.Reset = False
+                    self.Hook.on_reset()
                 utility.apply(lambda client: client.close(), clients)
                 self.Hook.on_stop(**kwargs)
 

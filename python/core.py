@@ -52,10 +52,16 @@ class AgentServerHook(server.ServerHook):
         session.run([var.initializer for var in self.InternalState])
 
     def on_step(self, observations, session, **kwargs):
-        return session.run(self.StepOp, feed_dict={self.Model.Inputs: numpy.array([observations])[:, :, 1:]})
+        return session.run(self.StepOp, feed_dict=self.generate_feed_dict(observations))
 
     def on_stop(self, session, **kwargs):
         pass
+
+    def on_reset(self):
+        pass
+
+    def generate_feed_dict(self, observations):
+        return {self.Model.Inputs: numpy.array([observations])[:, :, 1:]}
 
 
 class PowerTACGameHook(AgentServerHook):
@@ -156,15 +162,22 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
     def __init__(self, model_builder_fn, num_clients: int, powertac_port: int,
                  cpu_semaphore: threading.BoundedSemaphore, rollout_size: int, recv_queue: queue.Queue,
-                 objective_shift_phase_op,
+                 alternate_model_name, objective_shift_op, gamma_op, lambda_val,
                  name="PowerTACRolloutHook"):
         super().__init__(model_builder_fn, num_clients, powertac_port, cpu_semaphore, name)
+
+        internal_state = __build_internal_state__(name + 'Alt', model_builder_fn.state_shapes(1))
+        model = model_builder_fn(1, internal_state, name=alternate_model_name)
+
+        with tf.control_dependencies([tf.assign(internal_state[idx], model.StateTupleOut[idx])
+                                      for idx in range(len(internal_state))]):
+            alt_step_op = tf.identity(model.EvaluationOp)
 
         self.ModelVersion = 0
         self.ExpectedModelVersion = 0
         self.RolloutSize = rollout_size
         self.RecvQueue = recv_queue
-        self.__objective_shift_phase_op__ = objective_shift_phase_op
+        self.Lambda = lambda_val
         self.__rollout_states__ = None
         self.__observation_rollouts__ = numpy.zeros(shape=(rollout_size, num_clients,
                                                            self.Model.Inputs.shape.dims[-1] + 1),
@@ -179,21 +192,25 @@ class PowerTACRolloutHook(PowerTACGameHook):
                                                  dtype=numpy.float32)
         self.__cash__ = numpy.zeros(shape=(1, num_clients), dtype=numpy.float32)
         self.__rollout_index__ = 0
-        self.StepOp = [self.StepOp,
+        self.StepOp = [tf.concat([self.StepOp[:-1, :], alt_step_op], axis=0),
                        tf.squeeze(self.Model.StateValue, axis=-1),
                        self.Model.Policies.log_prob(self.StepOp),
-                       self.__objective_shift_phase_op__]
+                       objective_shift_op,
+                       gamma_op]
+        self.AlternateModel = model
+        self.AlternateInternalState = internal_state
 
     def on_start(self, session, **kwargs):
         super().on_start(session, **kwargs)
         self.__rollout_index__ = 0
         self.__cash__.fill(0.0)
+        session.run([var.initializer for var in self.AlternateInternalState])
 
     def on_step(self, observations, session, **kwargs):
-        if self.ModelVersion == self.ExpectedModelVersion:
+        if self.ExpectedModelVersion == self.ModelVersion:
             actions = self.__handle_rollout_step__(observations, session, **kwargs)
         else:
-            actions, _, _, _ = super().on_step(observations, session, **kwargs)
+            actions, _, _, _, _ = super().on_step(observations, session, **kwargs)
 
         self.__cash__ = numpy.array([observations])[:, :, 0]
 
@@ -202,6 +219,10 @@ class PowerTACRolloutHook(PowerTACGameHook):
     def update(self):
         self.ModelVersion = self.ModelVersion + 1
 
+    def on_reset(self):
+        self.ModelVersion = 0
+        self.ExpectedModelVersion = 0
+
     def __handle_rollout_step__(self, observations, session, **kwargs):
         rollout_idx = self.__rollout_index__ % self.RolloutSize
         rollout_nidx = rollout_idx + 1
@@ -209,45 +230,50 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
         if rollout_idx == 0:
             self.__rollout_states__ = numpy.array(session.run(self.InternalState))
-        actions, value, log_prob, objective_shift = super().on_step(observations, session, **kwargs)
+        actions, value, log_prob, objective_shift, gamma = super().on_step(observations, session, **kwargs)
 
         observations = numpy.array([observations])
         value = numpy.array([value])
 
         self.__reward_rollouts__[rollout_pidx: rollout_pidx + 1, :] = observations[:, :, 0] - self.__cash__
         if self.__rollout_index__ > 0 and rollout_idx == 0:
-            print("%s submitting rollout for model update %d" % (self.Name, self.ExpectedModelVersion - 1))
-            reward_var = numpy.square(self.__reward_rollouts__)
-            reward_var = numpy.mean(reward_var, axis=1, keepdims=True)
-            reward_std = numpy.sqrt(reward_var)
-            reward_std = numpy.where(reward_std > 0, reward_std, numpy.ones_like(reward_std))
-            objective_profit = self.__reward_rollouts__ / reward_std
-            objective_profit = (1 - objective_shift) * objective_profit
+            print("%s submitting rollout for model update %d" % (self.Name, self.ExpectedModelVersion))
+            nvalues = numpy.concatenate([self.__value_rollouts__[1:, :], value], axis=0)
 
-            reward_mean = numpy.mean(self.__reward_rollouts__, axis=1, keepdims=True)
-            reward_var = numpy.square(self.__reward_rollouts__ - reward_mean)
-            reward_var = numpy.mean(reward_var, axis=1, keepdims=True)
-            reward_std = numpy.sqrt(reward_var)
-            reward_std = numpy.where(reward_std > 0, reward_std, numpy.ones_like(reward_std))
-            objective_compete = (self.__reward_rollouts__ - reward_mean) / reward_std
-            objective_compete = objective_shift * objective_compete
+            profit_mean = numpy.mean(self.__reward_rollouts__, axis=1, keepdims=True)
+            objective_profit = (1-objective_shift) * self.__reward_rollouts__
+            objective_compete = objective_shift * (self.__reward_rollouts__ - profit_mean)
 
-            self.__reward_rollouts__ = objective_profit + objective_compete
+            self.__reward_rollouts__ = (objective_profit + objective_compete) / 1e5
 
-            for idx in range(self.ClientCount):
+            delta = self.__reward_rollouts__ + gamma * nvalues - self.__value_rollouts__
+            gae_factor = gamma * self.Lambda
+            delta[-2:-1, :] = delta[-2:-1, :] + gae_factor * delta[-1:, :]
+            for idx in range(delta.shape[0] - 2):
+                delta[-idx - 3:-idx - 2, :] = delta[-idx - 3:-idx - 2, :] + gae_factor * delta[-idx - 2:-idx - 1, :]
+
+            self.__reward_rollouts__ = delta
+            self.__value_rollouts__ = delta + self.__value_rollouts__
+
+            for idx in range(self.ClientCount - 1):
                 self.RecvQueue.put((self.__rollout_states__[:, :, idx: idx + 1, :],
                                     self.__observation_rollouts__[:, idx: idx + 1, :],
                                     self.__action_rollouts__[:, idx: idx + 1, :],
                                     self.__log_prob_rollouts__[:, idx: idx + 1, :],
                                     self.__reward_rollouts__[:, idx: idx + 1],
-                                    self.__value_rollouts__[:, idx: idx + 1],
-                                    value[:, idx: idx + 1]))
+                                    self.__value_rollouts__[:, idx: idx + 1]))
             self.ExpectedModelVersion = self.ExpectedModelVersion + 1
 
-        self.__observation_rollouts__[rollout_idx: rollout_nidx, :, :] = observations
+        self.__observation_rollouts__[rollout_idx: rollout_nidx, :, :] = observations[:, :, :]
         self.__action_rollouts__[rollout_idx: rollout_nidx, :, :] = numpy.array([actions])
         self.__log_prob_rollouts__[rollout_idx: rollout_nidx, :, :] = log_prob
         self.__value_rollouts__[rollout_idx: rollout_nidx, :] = value
         self.__rollout_index__ = self.__rollout_index__ + 1
 
         return actions
+
+    def generate_feed_dict(self, observations):
+        original = super().generate_feed_dict(observations)
+        original[self.AlternateModel.Inputs] = numpy.array([observations[-1:]])[:, :, 1:]
+
+        return original

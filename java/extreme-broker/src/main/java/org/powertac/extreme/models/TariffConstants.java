@@ -10,7 +10,7 @@ public class TariffConstants {
 			PowerType.ELECTRIC_VEHICLE, PowerType.FOSSIL_PRODUCTION, PowerType.INTERRUPTIBLE_CONSUMPTION, PowerType.PRODUCTION, 
 			PowerType.PUMPED_STORAGE_PRODUCTION, PowerType.RUN_OF_RIVER_PRODUCTION, PowerType.SOLAR_PRODUCTION, PowerType.STORAGE,
 			PowerType.THERMAL_STORAGE_CONSUMPTION, PowerType.WIND_PRODUCTION);
-	public final static int TIME_OF_USE_SLOTS = 12;
+	public final static int TIME_OF_USE_SLOTS = 6;
 	public final static int TARIFF_PER_ACTOR = 4;
 	public final static int NUM_TARIFF_ACTOR = 5;
 }
