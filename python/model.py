@@ -327,7 +327,7 @@ class Model:
                                                                              name="FF_%d" % idx),
                                                             ContinuousPolicy(cov_state[idx], 1,
                                                                              name="FR_%d" % idx),
-                                                            ContinuousPolicy(cov_state[idx], 2, scale=50.0,
+                                                            ContinuousPolicy(cov_state[idx], 2, scale=0.5,
                                                                              name="REG_%d" % idx),
                                                             ContinuousPolicy(cov_state[idx], 1, scale=5.0,
                                                                              name="PP_%d" % idx)],
