@@ -242,10 +242,10 @@ class Model:
     HIDDEN_STATE_COUNT = 2048
     MARKET_COV_STATE_COUNT = 512
     TARIFF_COV_STATE_COUNT = 128
-    WEATHER_EMBEDDING_COUNT = 128
-    MARKET_EMBEDDING_COUNT = 256
-    TARIFF_EMBEDDING_COUNT = 64
-    EMBEDDING_COUNT = 1024
+    FORECAST_EMBEDDING_COUNT = 64
+    MARKET_EMBEDDING_COUNT = 128
+    TARIFF_EMBEDDING_COUNT = 32
+    EMBEDDING_COUNT = 512
     TARIFF_SLOTS_PER_ACTOR = 4
     TARIFF_ACTORS = 5
 
@@ -264,25 +264,27 @@ class Model:
 
             embedding = tf.reshape(inputs, [-1, Model.FEATURE_COUNT])
             embedding = running_stats(embedding)
-            embedding = tf.split(embedding, [7, 100, 168, 26,
+            embedding = tf.split(embedding, [7, 96, 4, 168, 26,
                                              *([35] * Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS)],
                                  axis=-1)
-            weather_embedding = __build_embedding__(tf.concat([embedding[0], embedding[1]], axis=-1),
-                                                    Model.WEATHER_EMBEDDING_COUNT,
-                                                    activation=tf.nn.relu, initializer=init.orthogonal(np.sqrt(2)),
-                                                    name="WeatherEmbedding")
-            market_embedding = __build_embedding__(tf.concat([embedding[0], embedding[2]], axis=-1),
+            forecast_embedding = __build_embedding__(tf.concat([embedding[0], embedding[1]], axis=-1),
+                                                     Model.FORECAST_EMBEDDING_COUNT,
+                                                     activation=tf.nn.relu, initializer=init.orthogonal(np.sqrt(2)),
+                                                     name="ForecastEmbedding")
+            market_embedding = __build_embedding__(embedding[3],
                                                    Model.MARKET_EMBEDDING_COUNT,
                                                    activation=tf.nn.relu, initializer=init.orthogonal(np.sqrt(2)),
                                                    name="MarketEmbedding")
-            tariff_embeddings = [__build_embedding__(tf.concat([embedding[0], embedding[3], embedding[-(idx + 1)]],
-                                                               axis=-1),
+            tariff_embeddings = [__build_embedding__(embedding[-(idx + 1)],
                                                      Model.TARIFF_EMBEDDING_COUNT,
                                                      activation=tf.nn.relu, initializer=init.orthogonal(np.sqrt(2)),
                                                      name="TariffEmbedding")
                                  for idx in range(Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS)]
             tariff_embeddings = tf.concat(tariff_embeddings, axis=-1)
-            embedding = tf.concat([embedding[0], weather_embedding, market_embedding, tariff_embeddings], axis=-1)
+            embedding = tf.concat([embedding[0], embedding[2], embedding[4],
+                                   forecast_embedding,
+                                   market_embedding,
+                                   tariff_embeddings], axis=-1)
 
             embedding = __build_embedding__(embedding,
                                             Model.EMBEDDING_COUNT,

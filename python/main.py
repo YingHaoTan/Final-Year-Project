@@ -12,8 +12,7 @@ import random
 SUMMARY_DIR = "summary"
 CHECKPOINT_DIR = "ckpt"
 CHECKPOINT_PREFIX = os.path.join(CHECKPOINT_DIR, "model")
-INITIAL_PPO_EPSILON = 0.3
-FINAL_PPO_EPSILON = 0.2
+PPO_EPSILON = 0.2
 PORT = 61000
 PT_PORT = 60000
 ROLLOUT_STEPS = 168
@@ -21,9 +20,11 @@ BUFFER_SIZE = 36
 NUM_MINIBATCH = 2
 NUM_EPOCHS = 8
 MAX_EPOCHS = 5000 * NUM_EPOCHS
-MAX_PHASE = 1000 * NUM_EPOCHS
-INITIAL_LR = 1e-4
-FINAL_LR = 1e-5
+MAX_PHASE = 2500 * NUM_EPOCHS
+INITIAL_PHASE = 500 * NUM_EPOCHS
+INITIAL_LR = 2e-4
+FINAL_LR = 2e-5
+PRD_C = 0.015
 
 NUM_CLIENTS = [4] * 12
 LAMBDA = 0.95
@@ -68,13 +69,14 @@ cmodel = model.Model(d_obs[:, :, 1:], tf.unstack(d_state, 2))
 
 transfer_op = model.Model.create_transfer_op(cmodel, alt_model)
 global_step = tf.train.create_global_step()
-objective_shift_op = tf.cast(tf.minimum(global_step / (MAX_PHASE * NUM_MINIBATCH), 1.0), tf.float32)
-gamma_op = 0.995 + 0.0046 * objective_shift_op
+objective_step = tf.maximum(global_step - (INITIAL_PHASE * NUM_MINIBATCH), 0)
+objective_shift_op = tf.cast(tf.minimum(objective_step / (MAX_PHASE * NUM_MINIBATCH), 1.0), tf.float32)
+gamma_shift_op = tf.cast(tf.minimum(global_step / (MAX_PHASE * NUM_MINIBATCH), 1.0), tf.float32)
+gamma_op = 0.998 + 0.0017 * gamma_shift_op
 
-clip_range = INITIAL_PPO_EPSILON + (FINAL_PPO_EPSILON - INITIAL_PPO_EPSILON) * objective_shift_op
 d_adv = tf.expand_dims(d_adv, axis=1)
 prob_ratio = tf.exp(tf.reduce_sum(cmodel.Policies.log_prob(d_action) - d_log_prob, axis=-1))
-clipped_prob_ratio = tf.clip_by_value(prob_ratio, 1 - clip_range, 1 + clip_range)
+clipped_prob_ratio = tf.clip_by_value(prob_ratio, 1 - PPO_EPSILON, 1 + PPO_EPSILON)
 policy_loss = -tf.reduce_mean(tf.minimum(prob_ratio * d_adv,
                                          clipped_prob_ratio * d_adv))
 value_prediction = tf.squeeze(cmodel.StateValue, axis=1)
@@ -143,6 +145,7 @@ value_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=numpy.float
 rollout_idx = 0
 step_count = sess.run(global_step)
 
+prd_counter = 1
 for rollout in iter(ROLLOUT_QUEUE.get, None):
     state_buffer[rollout_idx: rollout_idx + 1, :, :, :] = numpy.transpose(rollout[0], (2, 0, 1, 3))
     observation_buffer[rollout_idx: rollout_idx + 1, :, :] = numpy.transpose(rollout[1], (1, 0, 2))
@@ -190,9 +193,12 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
 
             if stats_count > 0:
                 utility.apply(lambda hook: hook.update(), map(lambda server: server.Hook, servers))
-                if random.random() < 0.05:
+                if random.random() < PRD_C * prd_counter:
                     sess.run(transfer_op)
+                    prd_counter = 1
                     print("Transferred parameters to alternate model")
+                else:
+                    prd_counter = prd_counter + 1
         if step_count > MAX_EPOCHS * NUM_MINIBATCH:
             print("Completed training process, terminating session")
             utility.apply(lambda server: server.stop(), servers)
