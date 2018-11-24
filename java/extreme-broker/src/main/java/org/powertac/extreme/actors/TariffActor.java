@@ -96,7 +96,9 @@ public class TariffActor extends Actor<TariffState> {
 			double signnum = this.type.isConsumption()? -1.0: 1.0;
 			
 			TariffSpecification spec = new TariffSpecification(context.getBroker(), this.type)
-					.withPeriodicPayment(signnum * this.pp);
+					.withPeriodicPayment(signnum * this.pp)
+					.withEarlyWithdrawPayment(-this.pp * TariffConstants.NUM_MIN_DAY_DURATION)
+					.withMinDuration(TariffConstants.NUM_MIN_DAY_DURATION * 24 * 60 * 60 * 1000);
 			List<RateCore> rates = new ArrayList<RateCore>();
 			
 			int begin = 0;
