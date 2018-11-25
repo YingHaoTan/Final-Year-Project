@@ -99,7 +99,7 @@ def __build_conv_embedding__(inputs, num_units, ksizes=(4, 3, 3, 2), ssizes=(2, 
     forecast_embedding = inputs
     with tf.variable_scope(name):
         for idx in range(len(ksizes)):
-            num_filters = num_units / (2 ** (num_layers - idx - 1))
+            num_filters = int(num_units / (2 ** (num_layers - idx - 1)))
             forecast_embedding = tf.layers.conv1d(forecast_embedding, num_filters, ksizes[idx], ssizes[idx],
                                                   data_format='channels_first', activation=activation,
                                                   kernel_initializer=initializer,
