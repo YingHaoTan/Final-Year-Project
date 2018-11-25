@@ -13,5 +13,5 @@ public class TariffConstants {
 	public final static int TIME_OF_USE_SLOTS = 6;
 	public final static int TARIFF_PER_ACTOR = 4;
 	public final static int NUM_TARIFF_ACTOR = 5;
-	public final static int NUM_MIN_DAY_DURATION = 7;
+	public final static int NUM_MIN_DAY_DURATION = 2;
 }
