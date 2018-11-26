@@ -121,7 +121,7 @@ summary_writer = tf.summary.FileWriter(SUMMARY_DIR, graph=tf.get_default_graph()
 servers = [server.Server(NUM_CLIENTS[idx], PORT + idx,
                          core.PowerTACRolloutHook(model.Model, NUM_CLIENTS[idx], PT_PORT + idx,
                                                   CPU_SEMAPHORE, ROLLOUT_STEPS, ROLLOUT_QUEUE,
-                                                  alt_model.Name, 0.8, objective_shift_op, gamma_op, LAMBDA,
+                                                  alt_model.Name, 0.2, objective_shift_op, gamma_op, LAMBDA,
                                                   name="Game%02d" % idx))
            for idx in range(len(NUM_CLIENTS))]
 

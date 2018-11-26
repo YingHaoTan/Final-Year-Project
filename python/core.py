@@ -168,6 +168,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
         with tf.control_dependencies([tf.assign(internal_state[idx], model.StateTupleOut[idx])
                                       for idx in range(len(internal_state))]):
+            alternate_policy_prob = alternate_policy_prob / (1.0 / num_clients)
             step_op = tf.cond(tf.random_uniform(shape=()) < alternate_policy_prob,
                               lambda: tf.concat([self.StepOp[:-1, :], model.EvaluationOp], axis=0),
                               lambda: self.StepOp)
