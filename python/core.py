@@ -52,16 +52,13 @@ class AgentServerHook(server.ServerHook):
         session.run([var.initializer for var in self.InternalState])
 
     def on_step(self, observations, session, **kwargs):
-        return session.run(self.StepOp, feed_dict=self.generate_feed_dict(observations))
+        return session.run(self.StepOp, feed_dict={self.Model.Inputs: numpy.array([observations])[:, :, 1:]})
 
     def on_stop(self, session, **kwargs):
         pass
 
     def on_reset(self):
         pass
-
-    def generate_feed_dict(self, observations):
-        return {self.Model.Inputs: numpy.array([observations])[:, :, 1:]}
 
 
 class PowerTACGameHook(AgentServerHook):
@@ -162,16 +159,18 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
     def __init__(self, model_builder_fn, num_clients: int, powertac_port: int,
                  cpu_semaphore: threading.BoundedSemaphore, rollout_size: int, recv_queue: queue.Queue,
-                 alternate_model_name, objective_shift_op, gamma_op, lambda_val,
+                 alternate_model_name, alternate_policy_prob, objective_shift_op, gamma_op, lambda_val,
                  name="PowerTACRolloutHook"):
         super().__init__(model_builder_fn, num_clients, powertac_port, cpu_semaphore, name)
 
         internal_state = __build_internal_state__(name + 'Alt', model_builder_fn.state_shapes(1))
-        model = model_builder_fn(1, internal_state, name=alternate_model_name)
+        model = model_builder_fn(self.Model.Inputs[:, -1:, :], internal_state, name=alternate_model_name)
 
         with tf.control_dependencies([tf.assign(internal_state[idx], model.StateTupleOut[idx])
                                       for idx in range(len(internal_state))]):
-            alt_step_op = tf.identity(model.EvaluationOp)
+            step_op = tf.cond(tf.random_uniform(shape=()) < alternate_policy_prob,
+                              lambda: tf.concat([self.StepOp[:-1, :], model.EvaluationOp], axis=0),
+                              lambda: self.StepOp)
 
         self.ModelVersion = 0
         self.ExpectedModelVersion = 0
@@ -192,7 +191,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
                                                  dtype=numpy.float32)
         self.__cash__ = numpy.zeros(shape=(1, num_clients), dtype=numpy.float32)
         self.__rollout_index__ = 0
-        self.StepOp = [tf.concat([self.StepOp[:-1, :], alt_step_op], axis=0),
+        self.StepOp = [step_op,
                        tf.squeeze(self.Model.StateValue, axis=-1),
                        self.Model.Policies.log_prob(self.StepOp),
                        objective_shift_op,
@@ -271,9 +270,3 @@ class PowerTACRolloutHook(PowerTACGameHook):
         self.__rollout_index__ = self.__rollout_index__ + 1
 
         return actions
-
-    def generate_feed_dict(self, observations):
-        original = super().generate_feed_dict(observations)
-        original[self.AlternateModel.Inputs] = numpy.array([observations[-1:]])[:, :, 1:]
-
-        return original
