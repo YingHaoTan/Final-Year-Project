@@ -310,12 +310,13 @@ class Model:
             tariff_embeddings = []
             for idx in range(Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS):
                 tariff_embedding = embedding[-(idx + 1)]
-                tariff_embedding = tf.split(tariff_embedding, [14, 21])
-                tariff_embedding = tf.argmax(tariff_embedding, axis=-1)
-                tariff_embedding[0] = tf.contrib.layers.embed_sequence(tariff_embedding, 14,
+                tariff_embedding = tf.split(tariff_embedding, [14, 21], axis=-1)
+                tariff_embedding[0] = tf.expand_dims(tf.argmax(tariff_embedding[0], axis=-1), axis=1)
+                tariff_embedding[0] = tf.contrib.layers.embed_sequence(tariff_embedding[0], 14,
                                                                        Model.TARIFF_TYPE_EMBEDDING_COUNT,
                                                                        initializer=init.orthogonal(),
                                                                        scope="TariffTypeEmbedding")
+                tariff_embedding[0] = tf.squeeze(tariff_embedding[0], axis=1)
                 tariff_embeddings.append(__build_embedding__(tf.concat(tariff_embedding, axis=-1),
                                                              Model.TARIFF_EMBEDDING_COUNT,
                                                              activation=tf.nn.relu,
@@ -338,71 +339,66 @@ class Model:
             hidden_state, hidden_tuple_out = hidden_cell(reshaped_embedding, tuple(state_tuple_in))
             hidden_state = tf.reshape(hidden_state, [-1, Model.HIDDEN_STATE_COUNT])
             cov_state_splits = [Model.MARKET_COV_STATE_COUNT,
-                                *([
-                                      Model.TARIFF_COV_STATE_COUNT] * Model.TARIFF_ACTORS * Model.TARIFF_SLOTS_PER_ACTOR)]
-        cov_state = __build_dense__(hidden_state,
-                                    reduce(lambda a, b: a + b, cov_state_splits),
-                                    activation=tf.nn.relu,
-                                    initializer=init.orthogonal(np.sqrt(2)),
-                                    name="CovarianceState")
-        cov_state = tf.split(cov_state, cov_state_splits, axis=-1)
+                                *([Model.TARIFF_COV_STATE_COUNT] * Model.TARIFF_ACTORS * Model.TARIFF_SLOTS_PER_ACTOR)]
+            cov_state = __build_dense__(hidden_state,
+                                        reduce(lambda a, b: a + b, cov_state_splits),
+                                        activation=tf.nn.relu,
+                                        initializer=init.orthogonal(np.sqrt(2)),
+                                        name="CovarianceState")
+            cov_state = tf.split(cov_state, cov_state_splits, axis=-1)
 
-        market_actions = GroupedPolicy([CategoricalPolicy(hidden_state, 3, name="MarketAction")
-                                        for _ in range(Model.NUM_ENABLED_TIMESLOT)])
-        market_prices = ContinuousPolicy(cov_state[0], Model.NUM_ENABLED_TIMESLOT, scale=50.0,
-                                         name="MarketPrice")
-        market_quantities = ContinuousPolicy(cov_state[0], Model.NUM_ENABLED_TIMESLOT, scale=100.0,
-                                             name="MarketQuantity")
-        market_policies = GroupedPolicy([market_actions, market_prices, market_quantities], name="MarketPolicy")
+            market_actions = GroupedPolicy([CategoricalPolicy(hidden_state, 3, name="MarketAction")
+                                            for _ in range(Model.NUM_ENABLED_TIMESLOT)])
+            market_prices = ContinuousPolicy(cov_state[0], Model.NUM_ENABLED_TIMESLOT, scale=50.0,
+                                             name="MarketPrice")
+            market_quantities = ContinuousPolicy(cov_state[0], Model.NUM_ENABLED_TIMESLOT, scale=100.0,
+                                                 name="MarketQuantity")
+            market_policies = GroupedPolicy([market_actions, market_prices, market_quantities], name="MarketPolicy")
 
-        tariff_policies = GroupedPolicy([GroupedPolicy([CategoricalPolicy(hidden_state,
-                                                                          Model.TARIFF_SLOTS_PER_ACTOR,
-                                                                          name="TariffNumber_%d" % idx),
-                                                        CategoricalPolicy(hidden_state, 5,
-                                                                          name="TariffAction_%d" % idx),
-                                                        CategoricalPolicy(hidden_state, 13,
-                                                                          name="PowerType_%d" % idx),
-                                                        ContinuousPolicy(cov_state[idx], 6, scale=0.25,
-                                                                         name="VF_%d" % idx),
-                                                        ContinuousPolicy(cov_state[idx], 6,
-                                                                         name="VR_%d" % idx),
-                                                        ContinuousPolicy(cov_state[idx], 1, scale=0.25,
-                                                                         name="FF_%d" % idx),
-                                                        ContinuousPolicy(cov_state[idx], 1,
-                                                                         name="FR_%d" % idx),
-                                                        ContinuousPolicy(cov_state[idx], 2, scale=0.5,
-                                                                         name="REG_%d" % idx),
-                                                        ContinuousPolicy(cov_state[idx], 1, scale=5.0,
-                                                                         name="PP_%d" % idx)],
-                                                       name="TariffPolicy_%d" % idx)
-                                         for idx in range(1, Model.TARIFF_ACTORS + 1)])
+            tariff_policies = GroupedPolicy([GroupedPolicy([CategoricalPolicy(hidden_state,
+                                                                              Model.TARIFF_SLOTS_PER_ACTOR,
+                                                                              name="TariffNumber_%d" % idx),
+                                                            CategoricalPolicy(hidden_state, 5,
+                                                                              name="TariffAction_%d" % idx),
+                                                            CategoricalPolicy(hidden_state, 13,
+                                                                              name="PowerType_%d" % idx),
+                                                            ContinuousPolicy(cov_state[idx], 6, scale=0.25,
+                                                                             name="VF_%d" % idx),
+                                                            ContinuousPolicy(cov_state[idx], 6,
+                                                                             name="VR_%d" % idx),
+                                                            ContinuousPolicy(cov_state[idx], 1, scale=0.25,
+                                                                             name="FF_%d" % idx),
+                                                            ContinuousPolicy(cov_state[idx], 1,
+                                                                             name="FR_%d" % idx),
+                                                            ContinuousPolicy(cov_state[idx], 2, scale=0.5,
+                                                                             name="REG_%d" % idx),
+                                                            ContinuousPolicy(cov_state[idx], 1, scale=5.0,
+                                                                             name="PP_%d" % idx)],
+                                                           name="TariffPolicy_%d" % idx)
+                                             for idx in range(1, Model.TARIFF_ACTORS + 1)])
 
-        self.Name = name
-        self.Inputs = inputs
-        self.Embedding = embedding
-        self.RunningStats = running_stats
-        self.HiddenState = hidden_state
-        self.StateTupleOut = hidden_tuple_out
-        self.Policies = GroupedPolicy([market_policies, tariff_policies], name="Policy")
-        self.StateValue = __build_dense__(hidden_state, 1, name="StateValue")
-        self.EvaluationOp = self.Policies.sample()
-        self.PredictOp = self.Policies.mode() \
- \
-                         @ property
+            self.Name = name
+            self.Inputs = inputs
+            self.Embedding = embedding
+            self.RunningStats = running_stats
+            self.HiddenState = hidden_state
+            self.StateTupleOut = hidden_tuple_out
+            self.Policies = GroupedPolicy([market_policies, tariff_policies], name="Policy")
+            self.StateValue = __build_dense__(hidden_state, 1, name="StateValue")
+            self.EvaluationOp = self.Policies.sample()
+            self.PredictOp = self.Policies.mode()
 
+    @ property
+    def variables(self):
+        return tf.trainable_variables(self.Name)
 
-def variables(self):
-    return tf.trainable_variables(self.Name)
+    @staticmethod
+    def create_transfer_op(srcmodel, dstmodel):
+        srcvars = tf.trainable_variables(srcmodel.Name)
+        dstvars = tf.trainable_variables(dstmodel.Name)
 
+        return tuple(tf.assign(dstvars[idx], srcvars[idx]) for idx in range(len(srcvars)))
 
-@staticmethod
-def create_transfer_op(srcmodel, dstmodel):
-    srcvars = tf.trainable_variables(srcmodel.Name)
-    dstvars = tf.trainable_variables(dstmodel.Name)
-
-    return tuple(tf.assign(dstvars[idx], srcvars[idx]) for idx in range(len(srcvars)))
-
-
-@staticmethod
-def state_shapes(batch_size):
-    return [[1, batch_size, Model.HIDDEN_STATE_COUNT]] * 2
+    @staticmethod
+    def state_shapes(batch_size):
+        return [[1, batch_size, Model.HIDDEN_STATE_COUNT]] * 2
