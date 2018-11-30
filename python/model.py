@@ -263,6 +263,7 @@ class Model:
     TARIFF_COV_STATE_COUNT = 128
     WEATHER_EMBEDDING_COUNT = 128
     MARKET_EMBEDDING_COUNT = 256
+    TARIFF_TYPE_EMBEDDING_COUNT = 5
     TARIFF_EMBEDDING_COUNT = 32
     EMBEDDING_COUNT = 512
     TARIFF_SLOTS_PER_ACTOR = 4
@@ -312,6 +313,7 @@ class Model:
                 tariff_embedding = tf.split(tariff_embedding, [14, 21])
                 tariff_embedding = tf.argmax(tariff_embedding, axis=-1)
                 tariff_embedding[0] = tf.contrib.layers.embed_sequence(tariff_embedding, 14,
+                                                                       Model.TARIFF_TYPE_EMBEDDING_COUNT,
                                                                        initializer=init.orthogonal(),
                                                                        scope="TariffTypeEmbedding")
                 tariff_embeddings.append(__build_embedding__(tf.concat(tariff_embedding, axis=-1),
