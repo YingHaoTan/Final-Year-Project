@@ -116,6 +116,7 @@ with tf.name_scope("ProbabilityRatio"):
 summary_op = tf.summary.merge_all()
 
 saver = tf.train.Saver()
+
 summary_writer = tf.summary.FileWriter(SUMMARY_DIR, graph=tf.get_default_graph())
 
 servers = [server.Server(NUM_CLIENTS[idx], PORT + idx,

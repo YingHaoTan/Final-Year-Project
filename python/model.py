@@ -11,33 +11,33 @@ Inputs:
     Balancing transaction charge [5]
     Distribution transaction charge [6]
     Capacity transaction charge [7]
-    Temperature, Cloud Cover, Wind Speed, Wind Direction x 25 [8 - 107]
+    Temperature, Cloud Cover, Wind Speed, Wind Direction(Cosine), Wind Direction(Sine) x 25 [8 - 132]
 
-    Latest cleared trade price for 24 bidding timeslot [108-131]
-    Latest cleared trade quantity for 24 bidding timeslot [132-155]
-    Quantity of uncleared bids for 24 bidding timeslot [156-179]
-    Average uncleared bid price for 24 bidding timeslot [180-203]
-    Quantity of uncleared ask for 24 bidding timeslot [204-227]
-    Average uncleared ask price for 24 bidding timeslot [228-251]
-    Electricity balance for 24 bidding timeslot [252-275]
+    Latest cleared trade price for 24 bidding timeslot [133-156]
+    Latest cleared trade quantity for 24 bidding timeslot [157-180]
+    Quantity of uncleared bids for 24 bidding timeslot [181-204]
+    Average uncleared bid price for 24 bidding timeslot [205-228]
+    Quantity of uncleared ask for 24 bidding timeslot [229-252]
+    Average uncleared ask price for 24 bidding timeslot [253-276]
+    Electricity balance for 24 bidding timeslot [277-300]
 
-    Bootstrap customer count per PowerType [276 - 288]
-    Bootstrap customer power usage per PowerType [289 - 301]
+    Bootstrap customer count per PowerType [301 - 313]
+    Bootstrap customer power usage per PowerType [314 - 326]
 
-    Tariff PowerType category [302 - 315]
-    Total number of subscribers for tariff [316]
-    Average power usage per customer for tariff in the previous timeslot [317]
-    Time of use rate [318 - 323]
-    Time of use maximum curtailment value [324 - 329]
-    Tariff fixed rate [330]
-    Fixed rate maximum curtailment value [331]
-    Up regulation rate [332]
-    Down regulation rate [333]
-    Up regulation BO [334]
-    Down regulation BO [335]
-    Periodic payment [336]
+    Tariff PowerType category [327 - 340]
+    Total number of subscribers for tariff [341]
+    Average power usage per customer for tariff in the previous timeslot [342]
+    Time of use rate [343 - 348]
+    Time of use maximum curtailment value [349 - 354]
+    Tariff fixed rate [355]
+    Fixed rate maximum curtailment value [356]
+    Up regulation rate [357]
+    Down regulation rate [358]
+    Up regulation BO [359]
+    Down regulation BO [360]
+    Periodic payment [361]
 
-    Same structure as above section x 19 [337 - 1001]
+    Same structure as above section x 19 [362 - 1026]
 
 Outputs:
     Market Outputs:
@@ -249,14 +249,15 @@ class RunningStatistics:
         with tf.control_dependencies([tf.assign(self.Mean, mean), tf.assign(self.Var, var)]):
             return tf.assign(self.Count, count)
 
-    def __call__(self, inputs, *args, **kwargs):
-        return tf.cast((tf.cast(inputs, tf.float64) - self.Mean) / tf.sqrt(self.Var + self.Epsilon), tf.float32)
+    def __call__(self, inputs, mask, *args, **kwargs):
+        normalized = tf.cast((tf.cast(inputs, tf.float64) - self.Mean) / tf.sqrt(self.Var + self.Epsilon), tf.float32)
+        return tf.transpose(tf.where(mask, tf.transpose(normalized), tf.transpose(inputs)))
 
 
 class Model:
     NUM_ENABLED_TIMESLOT = 24
     ACTION_COUNT = 172
-    FEATURE_COUNT = 1001
+    FEATURE_COUNT = 1026
     HIDDEN_STATE_COUNT = 2048
     MARKET_COV_STATE_COUNT = 512
     TARIFF_COV_STATE_COUNT = 128
@@ -280,13 +281,16 @@ class Model:
 
             inputs_shape = inputs.shape
 
+            mask = tf.convert_to_tensor([*([False] * 4), *([True] * 3),
+                                         *([True, True, True, False, False] * 25),
+                                         *([True] * 194), *([*([False] * 14), *([True] * 21)] * 20)])
             embedding = tf.reshape(inputs, [-1, Model.FEATURE_COUNT])
-            embedding = running_stats(embedding)
-            embedding = tf.split(embedding, [7, 96, 4, 168, 26,
+            embedding = running_stats(embedding, mask)
+            embedding = tf.split(embedding, [7, 120, 5, 168, 26,
                                              *([35] * Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS)],
                                  axis=-1)
 
-            forecast_embedding = tf.transpose(tf.reshape(embedding[1], (-1, 24, 4)), (0, 2, 1))
+            forecast_embedding = tf.transpose(tf.reshape(embedding[1], (-1, 24, 5)), (0, 2, 1))
             forecast_embedding = __build_conv_embedding__(forecast_embedding,
                                                           Model.WEATHER_EMBEDDING_COUNT,
                                                           activation=tf.nn.relu,

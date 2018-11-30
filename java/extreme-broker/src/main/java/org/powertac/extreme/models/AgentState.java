@@ -96,7 +96,7 @@ public class AgentState implements ISerialize, Initializable {
 
 	@Override
 	public int getSizeInBytes() {
-		return 432 + this.marketstate.getSizeInBytes() + this.tariffstate.getSizeInBytes();
+		return 532 + this.marketstate.getSizeInBytes() + this.tariffstate.getSizeInBytes();
 	}
 
 	@Override
@@ -116,7 +116,8 @@ public class AgentState implements ISerialize, Initializable {
 			buffer.putFloat(temperature[i]);
 			buffer.putFloat(cloud[i]);
 			buffer.putFloat(windspeed[i]);
-			buffer.putFloat(winddirection[i]);
+			buffer.putFloat((float)Math.cos(Math.toRadians(winddirection[i])));
+			buffer.putFloat((float)Math.sin(Math.toRadians(winddirection[i])));
 		}
 		
 		this.marketstate.serialize(buffer);
