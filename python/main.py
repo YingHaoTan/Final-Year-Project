@@ -133,7 +133,8 @@ sess = tf.Session()
 
 sess.run(tf.global_variables_initializer())
 sess.run(transfer_op)
-saver.restore(sess, tf.train.latest_checkpoint(CHECKPOINT_DIR))
+if tf.train.latest_checkpoint(CHECKPOINT_DIR) is not None:
+    saver.restore(sess, tf.train.latest_checkpoint(CHECKPOINT_DIR))
 
 server_threads = [threading.Thread(target=server.serve, kwargs={"session": sess}) for server in servers]
 utility.apply(lambda thread: thread.start(), server_threads)
