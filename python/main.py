@@ -20,8 +20,7 @@ BUFFER_SIZE = 36
 NUM_MINIBATCH = 2
 NUM_EPOCHS = 8
 MAX_EPOCHS = 5000 * NUM_EPOCHS
-MAX_PHASE = 2500 * NUM_EPOCHS
-INITIAL_PHASE = 500 * NUM_EPOCHS
+MAX_PHASE = 1500 * NUM_EPOCHS
 INITIAL_LR = 1e-4
 FINAL_LR = 1e-5
 PRD_C = 0.015
@@ -40,22 +39,24 @@ action_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS, mod
 log_prob_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS, model.Model.ACTION_COUNT))
 reward_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS))
 advantage_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS))
+value_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS))
 
 dataset = tf.data.Dataset.from_tensor_slices((state_placeholder,
                                               obs_placeholder, action_placeholder, log_prob_placeholder,
-                                              reward_placeholder, advantage_placeholder))
+                                              reward_placeholder, advantage_placeholder, value_placeholder))
 dataset = dataset.shuffle(BUFFER_SIZE)
 dataset = dataset.batch(BUFFER_SIZE // NUM_MINIBATCH)
 dataset = dataset.repeat(NUM_EPOCHS)
 d_iterator = dataset.make_initializable_iterator()
 
-d_state, d_obs, d_action, d_log_prob, d_reward, d_adv = d_iterator.get_next()
+d_state, d_obs, d_action, d_log_prob, d_reward, d_adv, d_value = d_iterator.get_next()
 d_state = tf.transpose(d_state, (1, 2, 0, 3))
 d_obs = tf.transpose(d_obs, (1, 0, 2))
 d_action = tf.reshape(tf.transpose(d_action, (1, 0, 2)), (-1, model.Model.ACTION_COUNT))
 d_log_prob = tf.reshape(tf.transpose(d_log_prob, (1, 0, 2)), [-1, model.Model.ACTION_COUNT])
 d_reward = tf.reshape(tf.transpose(d_reward, (1, 0)), [-1])
 d_adv = tf.reshape(tf.transpose(d_adv, (1, 0)), [-1])
+d_value = tf.reshape(tf.transpose(d_value, (1, 0)), [-1])
 
 dataset = tf.data.Dataset.from_tensor_slices((obs_placeholder, advantage_placeholder))
 dataset = dataset.map(lambda x, y: (x[:, 0], y))
@@ -69,8 +70,6 @@ cmodel = model.Model(d_obs[:, :, 1:], tf.unstack(d_state, 2))
 
 transfer_op = model.Model.create_transfer_op(cmodel, alt_model)
 global_step = tf.train.create_global_step()
-objective_step = tf.maximum(global_step - (INITIAL_PHASE * NUM_MINIBATCH), 0)
-objective_shift_op = tf.cast(tf.minimum(objective_step / (MAX_PHASE * NUM_MINIBATCH), 1.0), tf.float32)
 gamma_shift_op = tf.cast(tf.minimum(global_step / (MAX_PHASE * NUM_MINIBATCH), 1.0), tf.float32)
 gamma_op = 0.998 + 0.0017 * gamma_shift_op
 
@@ -80,8 +79,11 @@ clipped_prob_ratio = tf.clip_by_value(prob_ratio, 1 - PPO_EPSILON, 1 + PPO_EPSIL
 policy_loss = -tf.reduce_mean(tf.minimum(prob_ratio * d_adv,
                                          clipped_prob_ratio * d_adv))
 value_prediction = tf.squeeze(cmodel.StateValue, axis=1)
-value_loss = 0.5 * tf.reduce_mean((value_prediction - d_reward) ** 2)
-entropy_loss = 0.005 * tf.reduce_mean(cmodel.Policies.entropy())
+value_clipped = d_value + tf.clip_by_value(value_prediction - d_value, -PPO_EPSILON, PPO_EPSILON)
+value_clipped_loss = (value_clipped - d_reward) ** 2
+value_unclipped_loss = (value_prediction - d_reward) ** 2
+value_loss = 0.5 * tf.reduce_mean(tf.maximum(value_clipped, value_unclipped_loss))
+entropy_loss = 0.01 * tf.reduce_mean(cmodel.Policies.entropy())
 loss = policy_loss + value_loss - entropy_loss
 
 warmup_steps = NUM_MINIBATCH * NUM_EPOCHS
@@ -111,6 +113,7 @@ with tf.name_scope("Reward"):
     tf.summary.scalar("MaximumCash", tf.reduce_max(d_cash))
 with tf.name_scope("ProbabilityRatio"):
     tf.summary.histogram("Clipped", clipped_prob_ratio)
+    tf.summary.histogram("Unclipped", prob_ratio)
 
 
 summary_op = tf.summary.merge_all()
@@ -122,7 +125,7 @@ summary_writer = tf.summary.FileWriter(SUMMARY_DIR, graph=tf.get_default_graph()
 servers = [server.Server(NUM_CLIENTS[idx], PORT + idx,
                          core.PowerTACRolloutHook(model.Model, NUM_CLIENTS[idx], PT_PORT + idx,
                                                   CPU_SEMAPHORE, ROLLOUT_STEPS, ROLLOUT_QUEUE,
-                                                  alt_model.Name, 0.2, objective_shift_op, gamma_op, LAMBDA,
+                                                  alt_model.Name, 0.2, gamma_op, LAMBDA,
                                                   name="Game%02d" % idx))
            for idx in range(len(NUM_CLIENTS))]
 
@@ -130,6 +133,7 @@ sess = tf.Session()
 
 sess.run(tf.global_variables_initializer())
 sess.run(transfer_op)
+saver.restore(sess, tf.train.latest_checkpoint(CHECKPOINT_DIR))
 
 server_threads = [threading.Thread(target=server.serve, kwargs={"session": sess}) for server in servers]
 utility.apply(lambda thread: thread.start(), server_threads)
@@ -141,6 +145,7 @@ observation_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS, model.Model.
 action_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS, model.Model.ACTION_COUNT),
                             dtype=numpy.float32)
 log_prob_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS, model.Model.ACTION_COUNT), dtype=numpy.float32)
+advantage_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=numpy.float32)
 reward_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=numpy.float32)
 value_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=numpy.float32)
 rollout_idx = 0
@@ -152,8 +157,9 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
     observation_buffer[rollout_idx: rollout_idx + 1, :, :] = numpy.transpose(rollout[1], (1, 0, 2))
     action_buffer[rollout_idx: rollout_idx + 1, :, :] = numpy.transpose(rollout[2], (1, 0, 2))
     log_prob_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[3], (1, 0, 2))
-    reward_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[4], (1, 0))
-    value_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[5], (1, 0))
+    advantage_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[4], (1, 0))
+    reward_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[5], (1, 0))
+    value_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[6], (1, 0))
 
     rollout_idx = (rollout_idx + 1) % BUFFER_SIZE
     if rollout_idx == 0:
@@ -169,8 +175,9 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
                                     obs_placeholder: observation_buffer,
                                     action_placeholder: action_buffer,
                                     log_prob_placeholder: log_prob_buffer,
-                                    reward_placeholder: value_buffer,
-                                    advantage_placeholder: reward_buffer})
+                                    advantage_placeholder: advantage_buffer,
+                                    reward_placeholder: reward_buffer,
+                                    value_placeholder: value_buffer})
                 summary_value = None
                 data_present = True
                 mode_prob = 0
