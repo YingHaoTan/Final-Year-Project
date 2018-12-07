@@ -16,7 +16,7 @@ PPO_EPSILON = 0.2
 PORT = 61000
 PT_PORT = 60000
 ROLLOUT_STEPS = 168
-BUFFER_SIZE = 36
+BUFFER_SIZE = 42
 NUM_MINIBATCH = 2
 NUM_EPOCHS = 8
 MAX_EPOCHS = 5000 * NUM_EPOCHS
@@ -25,7 +25,7 @@ INITIAL_LR = 1e-4
 FINAL_LR = 1e-5
 PRD_C = 0.015
 
-NUM_CLIENTS = [4] * 12
+NUM_CLIENTS = [4] * 14
 LAMBDA = 0.95
 ROLLOUT_QUEUE = queue.Queue()
 CPU_SEMAPHORE = threading.BoundedSemaphore(1)
@@ -88,8 +88,8 @@ loss = policy_loss + value_loss - entropy_loss
 
 warmup_steps = NUM_MINIBATCH * NUM_EPOCHS
 warmup_lr = tf.train.polynomial_decay(0.0, global_step, warmup_steps, INITIAL_LR)
-lr = tf.train.polynomial_decay(INITIAL_LR, global_step - warmup_steps, MAX_EPOCHS * NUM_MINIBATCH, FINAL_LR)
-lr = tf.cond(global_step < warmup_steps, lambda: warmup_lr, lambda: lr)
+lr_decay = tf.train.polynomial_decay(INITIAL_LR, global_step - warmup_steps, MAX_EPOCHS * NUM_MINIBATCH, FINAL_LR)
+lr = tf.cond(global_step < warmup_steps, lambda: warmup_lr, lambda: lr_decay)
 optimizer = tf.train.RMSPropOptimizer(lr, decay=0.99, centered=True)
 grads = tf.gradients(loss, cmodel.variables)
 clipped_grads, global_norm = tf.clip_by_global_norm([tf.identity(grad) for grad in grads], 30.0)
@@ -114,6 +114,9 @@ with tf.name_scope("Reward"):
 with tf.name_scope("ProbabilityRatio"):
     tf.summary.histogram("Clipped", clipped_prob_ratio)
     tf.summary.histogram("Unclipped", prob_ratio)
+with tf.name_scope("Value"):
+    tf.summary.histogram("Clipped", tf.clip_by_value(value_prediction - d_value, -PPO_EPSILON, PPO_EPSILON))
+    tf.summary.histogram("Unclipped", value_prediction - d_value)
 
 
 summary_op = tf.summary.merge_all()
@@ -122,9 +125,10 @@ saver = tf.train.Saver()
 
 summary_writer = tf.summary.FileWriter(SUMMARY_DIR, graph=tf.get_default_graph())
 
+bootstrap_manager = core.BootstrapManager()
 servers = [server.Server(NUM_CLIENTS[idx], PORT + idx,
                          core.PowerTACRolloutHook(model.Model, NUM_CLIENTS[idx], PT_PORT + idx,
-                                                  CPU_SEMAPHORE, ROLLOUT_STEPS, ROLLOUT_QUEUE,
+                                                  CPU_SEMAPHORE, bootstrap_manager, ROLLOUT_STEPS, ROLLOUT_QUEUE,
                                                   alt_model.Name, 0.2, gamma_op, LAMBDA,
                                                   name="Game%02d" % idx))
            for idx in range(len(NUM_CLIENTS))]
@@ -214,3 +218,4 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
             break
 
 utility.apply(lambda thread: thread.join(), server_threads)
+bootstrap_manager.kill()

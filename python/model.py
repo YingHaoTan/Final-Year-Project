@@ -258,9 +258,9 @@ class Model:
     NUM_ENABLED_TIMESLOT = 24
     ACTION_COUNT = 172
     FEATURE_COUNT = 1026
-    HIDDEN_STATE_COUNT = 2048
-    MARKET_COV_STATE_COUNT = 512
-    TARIFF_COV_STATE_COUNT = 128
+    HIDDEN_STATE_COUNT = 1024
+    MARKET_COV_STATE_COUNT = 96
+    TARIFF_COV_STATE_COUNT = 32
     WEATHER_EMBEDDING_COUNT = 128
     MARKET_EMBEDDING_COUNT = 256
     TARIFF_TYPE_EMBEDDING_COUNT = 5
@@ -311,12 +311,8 @@ class Model:
             for idx in range(Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS):
                 tariff_embedding = embedding[-(idx + 1)]
                 tariff_embedding = tf.split(tariff_embedding, [14, 21], axis=-1)
-                tariff_embedding[0] = tf.expand_dims(tf.argmax(tariff_embedding[0], axis=-1), axis=1)
-                tariff_embedding[0] = tf.contrib.layers.embed_sequence(tariff_embedding[0], 14,
-                                                                       Model.TARIFF_TYPE_EMBEDDING_COUNT,
-                                                                       initializer=init.orthogonal(),
-                                                                       scope="TariffTypeEmbedding")
-                tariff_embedding[0] = tf.squeeze(tariff_embedding[0], axis=1)
+                tariff_embedding[0] = __build_dense__(tariff_embedding[0], Model.TARIFF_TYPE_EMBEDDING_COUNT,
+                                                      name="TariffTypeEmbedding")
                 tariff_embeddings.append(__build_embedding__(tf.concat(tariff_embedding, axis=-1),
                                                              Model.TARIFF_EMBEDDING_COUNT,
                                                              activation=tf.nn.relu,

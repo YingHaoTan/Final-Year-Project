@@ -5,8 +5,8 @@ import tensorflow as tf
 import tensorflow.initializers as init
 import subprocess
 import utility
-import queue
 import threading
+import queue
 import os
 
 
@@ -17,6 +17,72 @@ def __build_internal_state__(scope_name, state_shapes):
                         for index in range(len(state_shapes))])
 
     return states
+
+
+class Directory:
+    EXECUTABLE_DIR = os.path.join(os.path.dirname(__file__), "bin")
+    BOOTSTRAP_DIR = os.path.join(EXECUTABLE_DIR, "bootstrap")
+    SCRATCH_BOOTSTRAP_DIR = os.path.join(BOOTSTRAP_DIR, "NextGame")
+
+
+class BootstrapManager:
+
+    def __init__(self, max_parallelism=1):
+        self.IsActive = True
+        self.SemaphoreMap = {}
+        self.ActiveMap = {}
+        self.Queue = queue.Queue()
+        self.Workers = [threading.Thread(target=self.serve) for _ in range(max_parallelism)]
+        utility.apply(lambda worker: worker.start(), self.Workers)
+
+    def serve(self):
+        while self.IsActive:
+            identifier = self.Queue.get()
+            returncode = subprocess.call([*PowerTACGameHook.INTERPRETER_COMMAND,
+                                          os.path.relpath(os.path.join(Directory.EXECUTABLE_DIR,
+                                                                       "server.jar"),
+                                                          Directory.SCRATCH_BOOTSTRAP_DIR),
+                                          "--boot",
+                                          identifier],
+                                         cwd=Directory.SCRATCH_BOOTSTRAP_DIR,
+                                         stdin=subprocess.PIPE,
+                                         stdout=subprocess.PIPE,
+                                         stderr=subprocess.PIPE)
+
+            if returncode == 0:
+                self.SemaphoreMap[identifier].release()
+            else:
+                self.Queue.put(identifier)
+
+    def start_bootstrap(self, identifier):
+        if identifier not in self.ActiveMap:
+            self.ActiveMap[identifier] = False
+            self.SemaphoreMap[identifier] = threading.BoundedSemaphore(1)
+            self.SemaphoreMap[identifier].acquire()
+
+        if not self.ActiveMap[identifier]:
+            self.ActiveMap[identifier] = True
+            self.Queue.put(identifier)
+
+    def obtain_bootstrap(self, identifier):
+        if identifier not in self.ActiveMap or not self.ActiveMap[identifier]:
+            self.start_bootstrap(identifier)
+
+        scratch_bootstrap_file = os.path.join(Directory.SCRATCH_BOOTSTRAP_DIR, identifier)
+        bootstrap_file = os.path.join(Directory.BOOTSTRAP_DIR, identifier)
+        self.SemaphoreMap[identifier].acquire()
+
+        if os.path.exists(bootstrap_file):
+            os.remove(bootstrap_file)
+
+        os.rename(scratch_bootstrap_file, bootstrap_file)
+        self.ActiveMap[identifier] = False
+
+        return bootstrap_file
+
+    def kill(self):
+        self.IsActive = False
+        utility.apply(lambda worker: worker.join(), self.Workers)
 
 
 class AgentServerHook(server.ServerHook):
@@ -62,62 +128,36 @@ class AgentServerHook(server.ServerHook):
 
 
 class PowerTACGameHook(AgentServerHook):
-    EXECUTABLE_DIR = os.path.join(os.path.dirname(__file__), "bin")
-    BOOTSTRAP_DIR = os.path.join(EXECUTABLE_DIR, "bootstrap")
-    SCRATCH_BOOTSTRAP_DIR = os.path.join(BOOTSTRAP_DIR, "NextGame")
     INTERPRETER_COMMAND = ["java", "-jar"]
 
     def __init__(self, model_builder_fn, num_clients: int, powertac_port: int,
-                 cpu_semaphore: threading.BoundedSemaphore, name="AgentServerHook"):
+                 cpu_semaphore: threading.BoundedSemaphore,
+                 bootstrap_manager: BootstrapManager, name="AgentServerHook"):
         super().__init__(model_builder_fn, num_clients, name)
         self.PowerTACPort = powertac_port
         self.CPUSemaphore = cpu_semaphore
+        self.BootstrapManager = bootstrap_manager
         self.SemaphoreAcquired = False
         self.ServerProcess = None
         self.BootstrapProcess = None
         self.ClientProcesses = [None] * num_clients
 
-    def start_bootstrap_process(self, block=False):
-        self.BootstrapProcess = subprocess.Popen([*PowerTACGameHook.INTERPRETER_COMMAND,
-                                                  os.path.relpath(os.path.join(PowerTACGameHook.EXECUTABLE_DIR,
-                                                                               "server.jar"),
-                                                                  PowerTACGameHook.SCRATCH_BOOTSTRAP_DIR),
-                                                  "--boot",
-                                                  self.Name],
-                                                 cwd=PowerTACGameHook.SCRATCH_BOOTSTRAP_DIR,
-                                                 stdin=subprocess.PIPE,
-                                                 stdout=subprocess.PIPE,
-                                                 stderr=subprocess.PIPE)
-
-        if block:
-            self.BootstrapProcess.communicate()
-
     def setup(self, server_instance, **kwargs):
-        scratch_bootstrap_file = os.path.join(PowerTACGameHook.SCRATCH_BOOTSTRAP_DIR, self.Name)
-        bootstrap_file = os.path.join(PowerTACGameHook.BOOTSTRAP_DIR, self.Name)
         broker_identities = ",".join("Extreme%d" % idx for idx in range(self.ClientCount))
-
-        if not os.path.exists(scratch_bootstrap_file):
-            self.start_bootstrap_process(block=True)
-
-        if os.path.exists(bootstrap_file):
-            os.remove(bootstrap_file)
-
-        os.rename(scratch_bootstrap_file, bootstrap_file)
+        bootstrap_file = self.BootstrapManager.obtain_bootstrap(self.Name)
 
         self.CPUSemaphore.acquire()
         print("Starting %s setup" % self.Name)
-
         self.ServerProcess = subprocess.Popen([*PowerTACGameHook.INTERPRETER_COMMAND,
                                                "server.jar",
                                                "--sim",
                                                "--jms-url",
                                                "tcp://localhost:%d" % self.PowerTACPort,
                                                "--boot-data",
-                                               os.path.relpath(bootstrap_file, PowerTACGameHook.EXECUTABLE_DIR),
+                                               os.path.relpath(bootstrap_file, Directory.EXECUTABLE_DIR),
                                                "--brokers",
                                                broker_identities],
-                                              cwd=PowerTACGameHook.EXECUTABLE_DIR,
+                                              cwd=Directory.EXECUTABLE_DIR,
                                               stdin=subprocess.PIPE,
                                               stdout=subprocess.PIPE,
                                               stderr=subprocess.PIPE)
@@ -131,24 +171,26 @@ class PowerTACGameHook(AgentServerHook):
                                                             str(server_instance.Port),
                                                             "--config",
                                                             "config/broker%d.properties" % index],
-                                                           cwd=PowerTACGameHook.EXECUTABLE_DIR,
+                                                           cwd=Directory.EXECUTABLE_DIR,
                                                            stdin=subprocess.PIPE,
                                                            stdout=subprocess.PIPE)
 
-        self.start_bootstrap_process()
+        self.BootstrapManager.start_bootstrap(self.Name)
         self.SemaphoreAcquired = True
 
+    def on_start(self, **kwargs):
+        super().on_start(**kwargs)
+        self.__try_release_semaphore__()
+
     def on_step(self, observations, session, **kwargs):
-        self.try_release_semaphore()
         return super().on_step(observations, session, **kwargs)
 
     def on_stop(self, session, **kwargs):
-        self.try_release_semaphore()
-        self.BootstrapProcess.communicate()
+        self.__try_release_semaphore__()
         self.ServerProcess.terminate()
         utility.apply(lambda client: client.terminate(), self.ClientProcesses)
 
-    def try_release_semaphore(self):
+    def __try_release_semaphore__(self):
         if self.SemaphoreAcquired:
             self.CPUSemaphore.release()
             self.SemaphoreAcquired = False
@@ -158,10 +200,12 @@ class PowerTACGameHook(AgentServerHook):
 class PowerTACRolloutHook(PowerTACGameHook):
 
     def __init__(self, model_builder_fn, num_clients: int, powertac_port: int,
-                 cpu_semaphore: threading.BoundedSemaphore, rollout_size: int, recv_queue: queue.Queue,
+                 cpu_semaphore: threading.BoundedSemaphore,
+                 bootstrap_manager: BootstrapManager,
+                 rollout_size: int, recv_queue: queue.Queue,
                  alternate_model_name, alternate_policy_prob, gamma_op, lambda_val,
                  name="PowerTACRolloutHook"):
-        super().__init__(model_builder_fn, num_clients, powertac_port, cpu_semaphore, name)
+        super().__init__(model_builder_fn, num_clients, powertac_port, cpu_semaphore, bootstrap_manager, name)
 
         internal_state = __build_internal_state__(name + 'Alt', model_builder_fn.state_shapes(1))
         model = model_builder_fn(self.Model.Inputs[:, -1:, :], internal_state, name=alternate_model_name)
@@ -200,7 +244,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
         self.AlternateInternalState = internal_state
 
     def on_start(self, session, **kwargs):
-        super().on_start(session, **kwargs)
+        super().on_start(session=session, **kwargs)
         self.__rollout_index__ = 0
         self.__cash__.fill(0.0)
         session.run([var.initializer for var in self.AlternateInternalState])

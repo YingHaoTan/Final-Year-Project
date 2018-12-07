@@ -1,6 +1,8 @@
 package org.powertac.extreme;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+
 import org.powertac.common.Competition;
 import org.powertac.common.config.ConfigurableValue;
 import org.powertac.common.repo.TimeslotRepo;
@@ -48,6 +50,7 @@ public class Agent implements Initializable, Activatable {
 		
 		try {
 			this.connection = new AgentConnection(backendPortNumber);
+			this.connection.write(ByteBuffer.wrap(new byte[] {0}));
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		}
