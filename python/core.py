@@ -283,8 +283,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
             print("%s submitting rollout for model update %d" % (self.Name, self.ExpectedModelVersion))
             nvalues = numpy.concatenate([self.__value_rollouts__[1:, :], value], axis=0)
 
-            profit_mean = numpy.mean(self.__reward_rollouts__, axis=1, keepdims=True)
-            self.__reward_rollouts__ = (self.__reward_rollouts__ - profit_mean) / 1e4
+            self.__reward_rollouts__ = self.__reward_rollouts__ / 5e4
 
             delta = self.__reward_rollouts__ + gamma * nvalues - self.__value_rollouts__
             gae_factor = gamma * self.Lambda
@@ -292,7 +291,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
             for idx in range(delta.shape[0] - 2):
                 delta[-idx - 3:-idx - 2, :] = delta[-idx - 3:-idx - 2, :] + gae_factor * delta[-idx - 2:-idx - 1, :]
 
-            advantage = delta
+            advantage = delta - delta.mean(axis=1, keepdims=True)
             reward = delta + self.__value_rollouts__
 
             for idx in range(self.ClientCount - 1):
