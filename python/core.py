@@ -291,7 +291,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
             for idx in range(delta.shape[0] - 2):
                 delta[-idx - 3:-idx - 2, :] = delta[-idx - 3:-idx - 2, :] + gae_factor * delta[-idx - 2:-idx - 1, :]
 
-            advantage = delta - delta.mean(axis=1, keepdims=True)
+            advantage = delta
             reward = delta + self.__value_rollouts__
 
             for idx in range(self.ClientCount - 1):
