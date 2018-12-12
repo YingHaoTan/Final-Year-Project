@@ -20,7 +20,7 @@ BUFFER_SIZE = 42
 NUM_MINIBATCH = 2
 NUM_EPOCHS = 8
 MAX_EPOCHS = 5000 * NUM_EPOCHS
-WARMUP_PHASE = 5 * NUM_EPOCHS
+WARMUP_PHASE = 1 * NUM_EPOCHS
 MAX_PHASE = 1500 * NUM_EPOCHS
 INITIAL_LR = 1e-4
 FINAL_LR = 1e-5
@@ -96,7 +96,7 @@ lr = tf.case([(tf.less_equal(global_step, warmup_steps), lambda: warmup_lr),
              default=lambda: tf.convert_to_tensor(INITIAL_LR))
 optimizer = tf.train.RMSPropOptimizer(lr, decay=0.99, centered=True)
 grads = tf.gradients(loss, cmodel.variables)
-clipped_grads, global_norm = tf.clip_by_global_norm([tf.identity(grad) for grad in grads], 30.0)
+clipped_grads, global_norm = tf.clip_by_global_norm([tf.identity(grad) for grad in grads], 20.0)
 grads_n_vars = zip(clipped_grads, cmodel.variables)
 train_op = optimizer.apply_gradients(grads_n_vars, global_step=global_step)
 
@@ -116,8 +116,7 @@ with tf.name_scope("Reward"):
     tf.summary.histogram("Predicted", cmodel.StateValue)
 with tf.name_scope("ProbabilityRatio"):
     tf.summary.histogram("Clipped", clipped_prob_ratio)
-    tf.summary.histogram("UnclippedP", tf.maximum(prob_ratio, 1.0))
-    tf.summary.histogram("UnclippedN", tf.minimum(prob_ratio, 1.0))
+    tf.summary.histogram("Unclipped", prob_ratio)
 with tf.name_scope("Value"):
     tf.summary.histogram("Clipped", tf.clip_by_value(value_prediction - d_value, -PPO_EPSILON, PPO_EPSILON))
     tf.summary.histogram("Unclipped", value_prediction - d_value)

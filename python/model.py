@@ -79,17 +79,6 @@ def __build_dense__(inputs, num_units, activation=None, initializer=init.orthogo
     return dense
 
 
-def __build_embedding__(inputs, num_units, activation=None, initializer=init.orthogonal(),
-                        bias_initializer=init.zeros(), use_layer_norm=False, name="Embedding"):
-    with tf.variable_scope(name):
-        encoder = __build_dense__(inputs, inputs.shape[-1], activation=activation,
-                                  initializer=initializer, bias_initializer=bias_initializer,
-                                  use_layer_norm=use_layer_norm, name="Encoder")
-
-        return __build_dense__(encoder, num_units, activation=activation, initializer=initializer,
-                               bias_initializer=bias_initializer, use_layer_norm=use_layer_norm, name="Vector")
-
-
 def __build_conv_embedding__(inputs, num_units, ksizes=(4, 3, 3, 2), ssizes=(2, 2, 2, 1),
                              activation=None, initializer=init.orthogonal(),
                              bias_initializer=init.zeros(), name="ConvEmbedding"):
@@ -105,6 +94,7 @@ def __build_conv_embedding__(inputs, num_units, ksizes=(4, 3, 3, 2), ssizes=(2, 
                                                   kernel_initializer=initializer,
                                                   bias_initializer=bias_initializer,
                                                   name=str(idx + 1))
+
         return tf.reshape(forecast_embedding, (-1, forecast_embedding.shape[-2]))
 
 
@@ -313,11 +303,11 @@ class Model:
                 tariff_embedding = tf.split(tariff_embedding, [14, 21], axis=-1)
                 tariff_embedding[0] = __build_dense__(tariff_embedding[0], Model.TARIFF_TYPE_EMBEDDING_COUNT,
                                                       name="TariffTypeEmbedding")
-                tariff_embeddings.append(__build_embedding__(tf.concat(tariff_embedding, axis=-1),
-                                                             Model.TARIFF_EMBEDDING_COUNT,
-                                                             activation=tf.nn.relu,
-                                                             initializer=init.orthogonal(np.sqrt(2)),
-                                                             name="TariffEmbedding"))
+                tariff_embeddings.append(__build_dense__(tf.concat(tariff_embedding, axis=-1),
+                                                         Model.TARIFF_EMBEDDING_COUNT,
+                                                         activation=tf.nn.relu,
+                                                         initializer=init.orthogonal(np.sqrt(2)),
+                                                         name="TariffEmbedding"))
 
             tariff_embeddings = tf.concat(tariff_embeddings, axis=-1)
             embedding = tf.concat([embedding[0], embedding[2], embedding[4],
@@ -325,11 +315,11 @@ class Model:
                                    market_embedding,
                                    tariff_embeddings], axis=-1)
 
-            embedding = __build_embedding__(embedding,
-                                            Model.EMBEDDING_COUNT,
-                                            activation=tf.nn.relu,
-                                            initializer=init.orthogonal(np.sqrt(2)),
-                                            name="Embedding")
+            embedding = __build_dense__(embedding,
+                                        Model.EMBEDDING_COUNT,
+                                        activation=tf.nn.relu,
+                                        initializer=init.orthogonal(np.sqrt(2)),
+                                        name="Embedding")
             reshaped_embedding = tf.reshape(embedding, [inputs_shape.dims[0], -1, embedding.shape.dims[-1]])
 
             hidden_state, hidden_tuple_out = hidden_cell(reshaped_embedding, tuple(state_tuple_in))

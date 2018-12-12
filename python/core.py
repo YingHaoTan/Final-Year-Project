@@ -234,7 +234,6 @@ class PowerTACRolloutHook(PowerTACGameHook):
         self.__value_rollouts__ = numpy.zeros(shape=(rollout_size, num_clients), dtype=numpy.float32)
         self.__log_prob_rollouts__ = numpy.zeros(shape=(rollout_size, num_clients, self.Model.ACTION_COUNT),
                                                  dtype=numpy.float32)
-        self.__cash__ = numpy.zeros(shape=(1, num_clients), dtype=numpy.float32)
         self.__rollout_index__ = 0
         self.StepOp = [step_op,
                        tf.squeeze(self.Model.StateValue, axis=-1),
@@ -243,10 +242,25 @@ class PowerTACRolloutHook(PowerTACGameHook):
         self.AlternateModel = model
         self.AlternateInternalState = internal_state
 
+    def __calculate_position__(self, cash):
+        p_array = numpy.zeros(shape=(1, self.ClientCount), dtype=numpy.float32)
+        sorted_indices = numpy.argsort(cash, axis=1)
+        p_cash_value = 0
+        max_variance = 0
+        for idx in range(self.ClientCount):
+            pos_idx = sorted_indices[0, idx]
+            if idx == 0 or cash[0, pos_idx] > p_cash_value:
+                p_array[0, pos_idx] = idx
+            else:
+                p_array[0, pos_idx] = p_array[0, sorted_indices[0, idx - 1]]
+            p_cash_value = cash[0, pos_idx]
+            max_variance = max_variance + idx ** 2
+
+        return (p_array - p_array.mean(axis=1, keepdims=True)) / numpy.sqrt(max_variance)
+
     def on_start(self, session, **kwargs):
         super().on_start(session=session, **kwargs)
         self.__rollout_index__ = 0
-        self.__cash__.fill(0.0)
         session.run([var.initializer for var in self.AlternateInternalState])
 
     def on_step(self, observations, session, **kwargs):
@@ -254,8 +268,6 @@ class PowerTACRolloutHook(PowerTACGameHook):
             actions = self.__handle_rollout_step__(observations, session, **kwargs)
         else:
             actions, _, _, _ = super().on_step(observations, session, **kwargs)
-
-        self.__cash__ = numpy.array([observations])[:, :, 0]
 
         return actions
 
@@ -278,21 +290,19 @@ class PowerTACRolloutHook(PowerTACGameHook):
         observations = numpy.array([observations])
         value = numpy.array([value])
 
-        self.__reward_rollouts__[rollout_pidx: rollout_pidx + 1, :] = observations[:, :, 0] - self.__cash__
+        self.__reward_rollouts__[rollout_pidx: rollout_pidx + 1, :] = self.__calculate_position__(observations[:, :, 0])
         if self.__rollout_index__ > 0 and rollout_idx == 0:
             print("%s submitting rollout for model update %d" % (self.Name, self.ExpectedModelVersion))
             nvalues = numpy.concatenate([self.__value_rollouts__[1:, :], value], axis=0)
 
-            self.__reward_rollouts__ = self.__reward_rollouts__ / 5e4
-
-            delta = self.__reward_rollouts__ + gamma * nvalues - self.__value_rollouts__
+            advantage = self.__reward_rollouts__ + gamma * nvalues - self.__value_rollouts__
             gae_factor = gamma * self.Lambda
-            delta[-2:-1, :] = delta[-2:-1, :] + gae_factor * delta[-1:, :]
-            for idx in range(delta.shape[0] - 2):
-                delta[-idx - 3:-idx - 2, :] = delta[-idx - 3:-idx - 2, :] + gae_factor * delta[-idx - 2:-idx - 1, :]
+            advantage[-2:-1, :] = advantage[-2:-1, :] + gae_factor * advantage[-1:, :]
+            for idx in range(advantage.shape[0] - 2):
+                gae = gae_factor * advantage[-idx - 2:-idx - 1, :]
+                advantage[-idx - 3:-idx - 2, :] = advantage[-idx - 3:-idx - 2, :] + gae
 
-            advantage = delta
-            reward = delta + self.__value_rollouts__
+            reward = advantage + self.__value_rollouts__
 
             for idx in range(self.ClientCount - 1):
                 self.RecvQueue.put((self.__rollout_states__[:, :, idx: idx + 1, :],
