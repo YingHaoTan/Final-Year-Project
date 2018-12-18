@@ -36,8 +36,9 @@ Inputs:
     Up regulation BO [359]
     Down regulation BO [360]
     Periodic payment [361]
+    Early withdrawal penalty [362]
 
-    Same structure as above section x 19 [362 - 1026]
+    Same structure as above section x 19 [363 - 1046]
 
 Outputs:
     Market Outputs:
@@ -51,7 +52,7 @@ Outputs:
         1 category valued policy representing Tariff PowerType
         6 continuous valued policy representing Time Of Use Tariff for each 4 hour timeslot for a day
         6 continuous valued policy representing curtailment ratio for each 4 hour timeslot for a day
-        5 continuous valued policy representing FIXED_RATE, CURTAILMENT_RATIO, UP_REG, DOWN_REG, PP
+        6 continuous valued policy representing FIXED_RATE, CURTAILMENT_RATIO, UP_REG, DOWN_REG, PP, EWP
 
     1 linear output representing V(s)
 """
@@ -77,6 +78,17 @@ def __build_dense__(inputs, num_units, activation=None, initializer=init.orthogo
                                    activation_fn=activation)
 
     return dense
+
+
+def __build_embedding__(inputs, num_units, activation=None, initializer=init.orthogonal(),
+                        bias_initializer=init.zeros(), use_layer_norm=False, name="Embedding"):
+    with tf.variable_scope(name):
+        encoder = __build_dense__(inputs, inputs.shape[-1], activation=activation,
+                                  initializer=initializer, bias_initializer=bias_initializer,
+                                  use_layer_norm=use_layer_norm, name="Encoder")
+
+        return __build_dense__(encoder, num_units, activation=activation, initializer=initializer,
+                               bias_initializer=bias_initializer, use_layer_norm=use_layer_norm, name="Vector")
 
 
 def __build_conv_embedding__(inputs, num_units, ksizes=(4, 3, 3, 2), ssizes=(2, 2, 2, 1),
@@ -246,8 +258,8 @@ class RunningStatistics:
 
 class Model:
     NUM_ENABLED_TIMESLOT = 24
-    ACTION_COUNT = 172
-    FEATURE_COUNT = 1026
+    ACTION_COUNT = 177
+    FEATURE_COUNT = 1046
     HIDDEN_STATE_COUNT = 1024
     MARKET_COV_STATE_COUNT = 96
     TARIFF_COV_STATE_COUNT = 32
@@ -274,11 +286,11 @@ class Model:
 
             mask = tf.convert_to_tensor([*([False] * 4), *([True] * 3),
                                          *([True, True, True, False, False] * 25),
-                                         *([True] * 194), *([*([False] * 14), *([True] * 21)] * 20)])
-            embedding = tf.reshape(inputs, [-1, Model.FEATURE_COUNT])
-            embedding = running_stats(embedding, mask)
-            embedding = tf.split(embedding, [7, 120, 5, 168, 26,
-                                             *([35] * Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS)],
+                                         *([True] * 194), *([*([False] * 14), *([True] * 22)] * 20)])
+            normalized_inputs = tf.reshape(inputs, [-1, Model.FEATURE_COUNT])
+            normalized_inputs = running_stats(normalized_inputs, mask)
+            embedding = tf.split(normalized_inputs, [7, 120, 5, 168, 26,
+                                                     *([36] * Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS)],
                                  axis=-1)
 
             forecast_embedding = tf.transpose(tf.reshape(embedding[1], (-1, 24, 5)), (0, 2, 1))
@@ -300,14 +312,14 @@ class Model:
             tariff_embeddings = []
             for idx in range(Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS):
                 tariff_embedding = embedding[-(idx + 1)]
-                tariff_embedding = tf.split(tariff_embedding, [14, 21], axis=-1)
+                tariff_embedding = tf.split(tariff_embedding, [14, 22], axis=-1)
                 tariff_embedding[0] = __build_dense__(tariff_embedding[0], Model.TARIFF_TYPE_EMBEDDING_COUNT,
                                                       name="TariffTypeEmbedding")
-                tariff_embeddings.append(__build_dense__(tf.concat(tariff_embedding, axis=-1),
-                                                         Model.TARIFF_EMBEDDING_COUNT,
-                                                         activation=tf.nn.relu,
-                                                         initializer=init.orthogonal(np.sqrt(2)),
-                                                         name="TariffEmbedding"))
+                tariff_embeddings.append(__build_embedding__(tf.concat(tariff_embedding, axis=-1),
+                                                             Model.TARIFF_EMBEDDING_COUNT,
+                                                             activation=tf.nn.relu,
+                                                             initializer=init.orthogonal(np.sqrt(2)),
+                                                             name="TariffEmbedding"))
 
             tariff_embeddings = tf.concat(tariff_embeddings, axis=-1)
             embedding = tf.concat([embedding[0], embedding[2], embedding[4],
@@ -324,20 +336,12 @@ class Model:
 
             hidden_state, hidden_tuple_out = hidden_cell(reshaped_embedding, tuple(state_tuple_in))
             hidden_state = tf.reshape(hidden_state, [-1, Model.HIDDEN_STATE_COUNT])
-            cov_state_splits = [Model.MARKET_COV_STATE_COUNT,
-                                *([Model.TARIFF_COV_STATE_COUNT] * Model.TARIFF_ACTORS * Model.TARIFF_SLOTS_PER_ACTOR)]
-            cov_state = __build_dense__(hidden_state,
-                                        reduce(lambda a, b: a + b, cov_state_splits),
-                                        activation=tf.nn.relu,
-                                        initializer=init.orthogonal(np.sqrt(2)),
-                                        name="CovarianceState")
-            cov_state = tf.split(cov_state, cov_state_splits, axis=-1)
 
             market_actions = GroupedPolicy([CategoricalPolicy(hidden_state, 3, name="MarketAction")
                                             for _ in range(Model.NUM_ENABLED_TIMESLOT)])
-            market_prices = ContinuousPolicy(cov_state[0], Model.NUM_ENABLED_TIMESLOT, scale=50.0,
+            market_prices = ContinuousPolicy(hidden_state, Model.NUM_ENABLED_TIMESLOT, scale=50.0,
                                              name="MarketPrice")
-            market_quantities = ContinuousPolicy(cov_state[0], Model.NUM_ENABLED_TIMESLOT, scale=100.0,
+            market_quantities = ContinuousPolicy(hidden_state, Model.NUM_ENABLED_TIMESLOT, scale=100.0,
                                                  name="MarketQuantity")
             market_policies = GroupedPolicy([market_actions, market_prices, market_quantities], name="MarketPolicy")
 
@@ -348,23 +352,26 @@ class Model:
                                                                               name="TariffAction_%d" % idx),
                                                             CategoricalPolicy(hidden_state, 13,
                                                                               name="PowerType_%d" % idx),
-                                                            ContinuousPolicy(cov_state[idx], 6, scale=0.25,
+                                                            ContinuousPolicy(hidden_state, 6, scale=0.25,
                                                                              name="VF_%d" % idx),
-                                                            ContinuousPolicy(cov_state[idx], 6,
+                                                            ContinuousPolicy(hidden_state, 6,
                                                                              name="VR_%d" % idx),
-                                                            ContinuousPolicy(cov_state[idx], 1, scale=0.25,
+                                                            ContinuousPolicy(hidden_state, 1, scale=0.25,
                                                                              name="FF_%d" % idx),
-                                                            ContinuousPolicy(cov_state[idx], 1,
+                                                            ContinuousPolicy(hidden_state, 1,
                                                                              name="FR_%d" % idx),
-                                                            ContinuousPolicy(cov_state[idx], 2, scale=0.5,
+                                                            ContinuousPolicy(hidden_state, 2, scale=0.5,
                                                                              name="REG_%d" % idx),
-                                                            ContinuousPolicy(cov_state[idx], 1, scale=5.0,
-                                                                             name="PP_%d" % idx)],
+                                                            ContinuousPolicy(hidden_state, 1, scale=5.0,
+                                                                             name="PP_%d" % idx),
+                                                            ContinuousPolicy(hidden_state, 1, scale=10.0,
+                                                                             name="EWP_%d" % idx)],
                                                            name="TariffPolicy_%d" % idx)
                                              for idx in range(1, Model.TARIFF_ACTORS + 1)])
 
             self.Name = name
             self.Inputs = inputs
+            self.NormalizedInputs = normalized_inputs
             self.Embedding = embedding
             self.RunningStats = running_stats
             self.HiddenState = hidden_state

@@ -22,8 +22,8 @@ NUM_EPOCHS = 8
 MAX_EPOCHS = 5000 * NUM_EPOCHS
 WARMUP_PHASE = 1 * NUM_EPOCHS
 MAX_PHASE = 1500 * NUM_EPOCHS
-INITIAL_LR = 1e-4
-FINAL_LR = 1e-5
+INITIAL_LR = 2.5e-4
+FINAL_LR = 2.5e-5
 PRD_C = 0.015
 
 NUM_CLIENTS = [4] * 14
@@ -75,6 +75,8 @@ gamma_shift_op = tf.cast(tf.minimum(global_step / (MAX_PHASE * NUM_MINIBATCH), 1
 gamma_op = 0.998 + 0.0017 * gamma_shift_op
 
 d_adv = tf.expand_dims(d_adv, axis=1)
+d_adv_mean, d_adv_std = tf.nn.moments(d_adv, (0, 1))
+d_adv = (d_adv - d_adv_mean) / (d_adv_std + 1e-8)
 prob_ratio = tf.exp(tf.reduce_sum(cmodel.Policies.log_prob(d_action) - d_log_prob, axis=-1))
 clipped_prob_ratio = tf.clip_by_value(prob_ratio, 1 - PPO_EPSILON, 1 + PPO_EPSILON)
 policy_loss = -tf.reduce_mean(tf.minimum(prob_ratio * d_adv,
@@ -104,6 +106,8 @@ tf.summary.scalar("Advantages", tf.reduce_mean(d_sadv))
 tf.summary.scalar("GNorm", global_norm)
 tf.summary.histogram("Cash", d_cash)
 tf.summary.histogram("Embedding", cmodel.Embedding)
+tf.summary.histogram("Advantage", d_sadv)
+tf.summary.histogram("Inputs", cmodel.NormalizedInputs)
 with tf.name_scope("Losses"):
     tf.summary.scalar("Policy", policy_loss)
     tf.summary.scalar("Value", value_loss)
@@ -121,11 +125,8 @@ with tf.name_scope("Value"):
     tf.summary.histogram("Clipped", tf.clip_by_value(value_prediction - d_value, -PPO_EPSILON, PPO_EPSILON))
     tf.summary.histogram("Unclipped", value_prediction - d_value)
 
-
 summary_op = tf.summary.merge_all()
-
 saver = tf.train.Saver()
-
 summary_writer = tf.summary.FileWriter(SUMMARY_DIR, graph=tf.get_default_graph())
 
 bootstrap_manager = core.BootstrapManager()

@@ -8,6 +8,7 @@ import utility
 import threading
 import queue
 import os
+from functools import reduce
 
 
 def __build_internal_state__(scope_name, state_shapes):
@@ -242,21 +243,22 @@ class PowerTACRolloutHook(PowerTACGameHook):
         self.AlternateModel = model
         self.AlternateInternalState = internal_state
 
-    def __calculate_position__(self, cash):
+    def __calculate_reward__(self, cash):
         p_array = numpy.zeros(shape=(1, self.ClientCount), dtype=numpy.float32)
         sorted_indices = numpy.argsort(cash, axis=1)
-        p_cash_value = 0
-        max_variance = 0
+        last_idx = 0
         for idx in range(self.ClientCount):
-            pos_idx = sorted_indices[0, idx]
-            if idx == 0 or cash[0, pos_idx] > p_cash_value:
-                p_array[0, pos_idx] = idx
-            else:
-                p_array[0, pos_idx] = p_array[0, sorted_indices[0, idx - 1]]
-            p_cash_value = cash[0, pos_idx]
-            max_variance = max_variance + idx ** 2
+            current_cash = cash[0, sorted_indices[0, idx]]
+            if idx == self.ClientCount - 1 or cash[0, sorted_indices[0, idx + 1]] > current_cash:
+                nidx = idx + 1
+                p_value = reduce(lambda a, b: a + b, range(last_idx, nidx)) / (nidx - last_idx)
+                for idx_internal in range(last_idx, nidx):
+                    p_array[0, sorted_indices[0, idx_internal]] = p_value
+                last_idx = nidx
+        p_mean = reduce(lambda a, b: a + b, range(self.ClientCount)) / self.ClientCount
+        p_variance = reduce(lambda a, b: a + b, map(lambda x: (x - p_mean) ** 2, range(self.ClientCount)))
 
-        return (p_array - p_array.mean(axis=1, keepdims=True)) / numpy.sqrt(max_variance)
+        return (p_array - p_mean) / numpy.sqrt(p_variance)
 
     def on_start(self, session, **kwargs):
         super().on_start(session=session, **kwargs)
@@ -290,11 +292,12 @@ class PowerTACRolloutHook(PowerTACGameHook):
         observations = numpy.array([observations])
         value = numpy.array([value])
 
-        self.__reward_rollouts__[rollout_pidx: rollout_pidx + 1, :] = self.__calculate_position__(observations[:, :, 0])
+        self.__reward_rollouts__[rollout_pidx: rollout_pidx + 1, :] = self.__calculate_reward__(observations[:, :, 0])
         if self.__rollout_index__ > 0 and rollout_idx == 0:
             print("%s submitting rollout for model update %d" % (self.Name, self.ExpectedModelVersion))
             nvalues = numpy.concatenate([self.__value_rollouts__[1:, :], value], axis=0)
 
+            self.__reward_rollouts__ = self.__reward_rollouts__ * (1 - gamma)
             advantage = self.__reward_rollouts__ + gamma * nvalues - self.__value_rollouts__
             gae_factor = gamma * self.Lambda
             advantage[-2:-1, :] = advantage[-2:-1, :] + gae_factor * advantage[-1:, :]
