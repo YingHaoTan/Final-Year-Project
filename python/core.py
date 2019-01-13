@@ -218,7 +218,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
                               lambda: tf.concat([self.StepOp[:-1, :], model.EvaluationOp], axis=0),
                               lambda: self.StepOp)
 
-        self.ModelVersion = 10
+        self.ModelVersion = 15
         self.ExpectedModelVersion = 0
         self.RolloutSize = rollout_size
         self.RecvQueue = recv_queue
@@ -274,10 +274,10 @@ class PowerTACRolloutHook(PowerTACGameHook):
         return actions
 
     def update(self):
-        self.ModelVersion = self.ModelVersion + 10
+        self.ModelVersion = self.ModelVersion + 15
 
     def on_reset(self):
-        self.ModelVersion = 10
+        self.ModelVersion = 15
         self.ExpectedModelVersion = 0
 
     def __handle_rollout_step__(self, observations, session, **kwargs):
