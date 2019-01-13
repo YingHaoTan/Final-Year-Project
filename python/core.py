@@ -23,7 +23,7 @@ def __build_internal_state__(scope_name, state_shapes):
 class Directory:
     EXECUTABLE_DIR = os.path.join(os.path.dirname(__file__), "bin")
     BOOTSTRAP_DIR = os.path.join(EXECUTABLE_DIR, "bootstrap")
-    SCRATCH_BOOTSTRAP_DIR = os.path.join(BOOTSTRAP_DIR, "NextGame")
+    SCRATCH_BOOTSTRAP_DIR = os.path.join(BOOTSTRAP_DIR, "scratch")
 
 
 class BootstrapManager:
@@ -218,7 +218,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
                               lambda: tf.concat([self.StepOp[:-1, :], model.EvaluationOp], axis=0),
                               lambda: self.StepOp)
 
-        self.ModelVersion = 0
+        self.ModelVersion = 10
         self.ExpectedModelVersion = 0
         self.RolloutSize = rollout_size
         self.RecvQueue = recv_queue
@@ -266,7 +266,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
         session.run([var.initializer for var in self.AlternateInternalState])
 
     def on_step(self, observations, session, **kwargs):
-        if self.ExpectedModelVersion == self.ModelVersion:
+        if self.ExpectedModelVersion < self.ModelVersion:
             actions = self.__handle_rollout_step__(observations, session, **kwargs)
         else:
             actions, _, _, _ = super().on_step(observations, session, **kwargs)
@@ -274,10 +274,10 @@ class PowerTACRolloutHook(PowerTACGameHook):
         return actions
 
     def update(self):
-        self.ModelVersion = self.ModelVersion + 1
+        self.ModelVersion = self.ModelVersion + 10
 
     def on_reset(self):
-        self.ModelVersion = 0
+        self.ModelVersion = 10
         self.ExpectedModelVersion = 0
 
     def __handle_rollout_step__(self, observations, session, **kwargs):
@@ -297,7 +297,6 @@ class PowerTACRolloutHook(PowerTACGameHook):
             print("%s submitting rollout for model update %d" % (self.Name, self.ExpectedModelVersion))
             nvalues = numpy.concatenate([self.__value_rollouts__[1:, :], value], axis=0)
 
-            self.__reward_rollouts__ = self.__reward_rollouts__ * (1 - gamma)
             advantage = self.__reward_rollouts__ + gamma * nvalues - self.__value_rollouts__
             gae_factor = gamma * self.Lambda
             advantage[-2:-1, :] = advantage[-2:-1, :] + gae_factor * advantage[-1:, :]

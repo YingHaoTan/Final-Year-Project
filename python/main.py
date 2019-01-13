@@ -16,15 +16,14 @@ PPO_EPSILON = 0.2
 PORT = 61000
 PT_PORT = 60000
 ROLLOUT_STEPS = 168
-BUFFER_SIZE = 42
-NUM_MINIBATCH = 2
-NUM_EPOCHS = 8
-MAX_EPOCHS = 5000 * NUM_EPOCHS
-WARMUP_PHASE = 1 * NUM_EPOCHS
-MAX_PHASE = 1500 * NUM_EPOCHS
+BUFFER_SIZE = 630
+NUM_MINIBATCH = 21
+NUM_EPOCHS = 20
+MAX_EPOCHS = 1000 * NUM_EPOCHS
+WARMUP_PHASE = 5 * NUM_EPOCHS
+MAX_PHASE = 200 * NUM_EPOCHS
 INITIAL_LR = 2.5e-4
 FINAL_LR = 2.5e-5
-PRD_C = 0.015
 
 NUM_CLIENTS = [4] * 14
 LAMBDA = 0.95
@@ -75,8 +74,6 @@ gamma_shift_op = tf.cast(tf.minimum(global_step / (MAX_PHASE * NUM_MINIBATCH), 1
 gamma_op = 0.998 + 0.0017 * gamma_shift_op
 
 d_adv = tf.expand_dims(d_adv, axis=1)
-d_adv_mean, d_adv_std = tf.nn.moments(d_adv, (0, 1))
-d_adv = (d_adv - d_adv_mean) / (d_adv_std + 1e-8)
 prob_ratio = tf.exp(tf.reduce_sum(cmodel.Policies.log_prob(d_action) - d_log_prob, axis=-1))
 clipped_prob_ratio = tf.clip_by_value(prob_ratio, 1 - PPO_EPSILON, 1 + PPO_EPSILON)
 policy_loss = -tf.reduce_mean(tf.minimum(prob_ratio * d_adv,
@@ -101,13 +98,13 @@ grads = tf.gradients(loss, cmodel.variables)
 clipped_grads, global_norm = tf.clip_by_global_norm([tf.identity(grad) for grad in grads], 20.0)
 grads_n_vars = zip(clipped_grads, cmodel.variables)
 train_op = optimizer.apply_gradients(grads_n_vars, global_step=global_step)
+parameter_delta = [cmodel.variables[idx] - alt_model.variables[idx] for idx in range(len(cmodel.variables))]
 
-tf.summary.scalar("Advantages", tf.reduce_mean(d_sadv))
-tf.summary.scalar("GNorm", global_norm)
+tf.summary.scalar("GlobalNorm", global_norm)
 tf.summary.histogram("Cash", d_cash)
 tf.summary.histogram("Embedding", cmodel.Embedding)
 tf.summary.histogram("Advantage", d_sadv)
-tf.summary.histogram("Inputs", cmodel.NormalizedInputs)
+tf.summary.histogram("ParameterDelta", tf.concat([tf.reshape(pdelta, [-1]) for pdelta in parameter_delta], axis=0))
 with tf.name_scope("Losses"):
     tf.summary.scalar("Policy", policy_loss)
     tf.summary.scalar("Value", value_loss)
@@ -160,7 +157,6 @@ value_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=numpy.float
 rollout_idx = 0
 step_count = sess.run(global_step)
 
-prd_counter = 1
 for rollout in iter(ROLLOUT_QUEUE.get, None):
     state_buffer[rollout_idx: rollout_idx + 1, :, :, :] = numpy.transpose(rollout[0], (2, 0, 1, 3))
     observation_buffer[rollout_idx: rollout_idx + 1, :, :] = numpy.transpose(rollout[1], (1, 0, 2))
@@ -172,13 +168,12 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
 
     rollout_idx = (rollout_idx + 1) % BUFFER_SIZE
     if rollout_idx == 0:
+        sess.run(transfer_op)
         stats_count = sess.run(cmodel.RunningStats.Count)
-
         print("Running Statistics Count: %d" % stats_count)
+
         with CPU_SEMAPHORE:
-            if stats_count == 0:
-                utility.apply(lambda server: server.reset(), servers)
-            else:
+            if stats_count > 0:
                 sess.run([d_iterator.initializer, d_summaryiterator.initializer],
                          feed_dict={state_placeholder: state_buffer,
                                     obs_placeholder: observation_buffer,
@@ -189,7 +184,6 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
                                     value_placeholder: value_buffer})
                 summary_value = None
                 data_present = True
-                mode_prob = 0
                 while data_present:
                     try:
                         _, summary_value, step_count = sess.run([train_op, summary_op, global_step])
@@ -208,14 +202,12 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
                                 cmodel.RunningStats.VarInput: stats_obs_buffer.var(axis=0, keepdims=True),
                                 cmodel.RunningStats.CountInput: stats_obs_buffer.shape[0]})
 
-            if stats_count > 0:
+            if stats_count == 0:
+                utility.apply(lambda server: server.reset(), servers)
+                with ROLLOUT_QUEUE.mutex:
+                    ROLLOUT_QUEUE.queue.clear()
+            else:
                 utility.apply(lambda hook: hook.update(), map(lambda server: server.Hook, servers))
-                if random.random() < PRD_C * prd_counter:
-                    sess.run(transfer_op)
-                    prd_counter = 1
-                    print("Transferred parameters to alternate model")
-                else:
-                    prd_counter = prd_counter + 1
         if step_count > MAX_EPOCHS * NUM_MINIBATCH:
             print("Completed training process, terminating session")
             utility.apply(lambda server: server.stop(), servers)

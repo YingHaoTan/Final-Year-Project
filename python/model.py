@@ -91,23 +91,23 @@ def __build_embedding__(inputs, num_units, activation=None, initializer=init.ort
                                bias_initializer=bias_initializer, use_layer_norm=use_layer_norm, name="Vector")
 
 
-def __build_conv_embedding__(inputs, num_units, ksizes=(4, 3, 3, 2), ssizes=(2, 2, 2, 1),
+def __build_conv_embedding__(inputs, num_units, ksizes=(2, 3, 3, 5), ssizes=(1, 2, 2, 1),
                              activation=None, initializer=init.orthogonal(),
                              bias_initializer=init.zeros(), name="ConvEmbedding"):
     assert len(ksizes) == len(ssizes)
 
     num_layers = len(ksizes)
-    forecast_embedding = inputs
+    conv_embedding = inputs
     with tf.variable_scope(name):
         for idx in range(len(ksizes)):
             num_filters = int(num_units / (2 ** (num_layers - idx - 1)))
-            forecast_embedding = tf.layers.conv1d(forecast_embedding, num_filters, ksizes[idx], ssizes[idx],
-                                                  data_format='channels_first', activation=activation,
-                                                  kernel_initializer=initializer,
-                                                  bias_initializer=bias_initializer,
-                                                  name=str(idx + 1))
+            conv_embedding = tf.layers.conv1d(conv_embedding, num_filters, ksizes[idx], ssizes[idx],
+                                              data_format='channels_first', activation=activation,
+                                              kernel_initializer=initializer,
+                                              bias_initializer=bias_initializer,
+                                              name=str(idx + 1))
 
-        return tf.reshape(forecast_embedding, (-1, forecast_embedding.shape[-2]))
+        return tf.reshape(conv_embedding, (-1, conv_embedding.shape[-2]))
 
 
 class Policy:
@@ -280,7 +280,8 @@ class Model:
 
         with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
             running_stats = RunningStatistics(Model.FEATURE_COUNT)
-            hidden_cell = rnn.CudnnLSTM(1, Model.HIDDEN_STATE_COUNT, name="%s_HState" % name)
+            hidden_cell = rnn.CudnnLSTM(1, Model.HIDDEN_STATE_COUNT, kernel_initializer=init.orthogonal(),
+                                        name="%s_HState" % name)
 
             inputs_shape = inputs.shape
 
@@ -293,13 +294,16 @@ class Model:
                                                      *([36] * Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS)],
                                  axis=-1)
 
+            current_weather = tf.transpose(tf.reshape(embedding[2], (-1, 1, 5)), (0, 2, 1))
             forecast_embedding = tf.transpose(tf.reshape(embedding[1], (-1, 24, 5)), (0, 2, 1))
-            forecast_embedding = __build_conv_embedding__(forecast_embedding,
-                                                          Model.WEATHER_EMBEDDING_COUNT,
-                                                          activation=tf.nn.relu,
-                                                          initializer=init.orthogonal(np.sqrt(2)),
-                                                          bias_initializer=init.zeros(),
-                                                          name="ForecastEmbedding")
+            weather_embedding = tf.concat([current_weather, forecast_embedding], axis=2)
+            weather_embedding = __build_conv_embedding__(weather_embedding,
+                                                         Model.WEATHER_EMBEDDING_COUNT,
+                                                         activation=tf.nn.relu,
+                                                         initializer=init.orthogonal(np.sqrt(2)),
+                                                         bias_initializer=init.zeros(),
+                                                         ksizes=(3, 3, 3, 5), ssizes=(1, 2, 2, 1),
+                                                         name="WeatherEmbedding")
 
             market_embedding = tf.reshape(embedding[3], (-1, 7, 24))
             market_embedding = __build_conv_embedding__(market_embedding,
@@ -322,8 +326,8 @@ class Model:
                                                              name="TariffEmbedding"))
 
             tariff_embeddings = tf.concat(tariff_embeddings, axis=-1)
-            embedding = tf.concat([embedding[0], embedding[2], embedding[4],
-                                   forecast_embedding,
+            embedding = tf.concat([embedding[0], embedding[4],
+                                   weather_embedding,
                                    market_embedding,
                                    tariff_embeddings], axis=-1)
 
