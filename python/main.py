@@ -95,7 +95,7 @@ lr = tf.case([(tf.less_equal(global_step, warmup_steps), lambda: warmup_lr),
              default=lambda: tf.convert_to_tensor(INITIAL_LR))
 optimizer = tf.train.RMSPropOptimizer(lr, decay=0.99, centered=True)
 grads = tf.gradients(loss, cmodel.variables)
-clipped_grads, global_norm = tf.clip_by_global_norm([tf.identity(grad) for grad in grads], 20.0)
+clipped_grads, global_norm = tf.clip_by_global_norm(grads, 20.0)
 grads_n_vars = zip(clipped_grads, cmodel.variables)
 train_op = optimizer.apply_gradients(grads_n_vars, global_step=global_step)
 parameter_delta = [cmodel.variables[idx] - alt_model.variables[idx] for idx in range(len(cmodel.variables))]
@@ -137,9 +137,10 @@ servers = [server.Server(NUM_CLIENTS[idx], PORT + idx,
 sess = tf.Session()
 
 sess.run(tf.global_variables_initializer())
-sess.run(transfer_op)
 if tf.train.latest_checkpoint(CHECKPOINT_DIR) is not None:
     saver.restore(sess, tf.train.latest_checkpoint(CHECKPOINT_DIR))
+else:
+    sess.run(transfer_op)
 
 server_threads = [threading.Thread(target=server.serve, kwargs={"session": sess}) for server in servers]
 utility.apply(lambda thread: thread.start(), server_threads)

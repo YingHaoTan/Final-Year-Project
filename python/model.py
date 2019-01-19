@@ -60,6 +60,7 @@ import tensorflow as tf
 import tensorflow.layers as layers
 import tensorflow.initializers as init
 import tensorflow.contrib.layers as clayers
+import tensorflow.contrib.compiler.xla as xla
 import tensorflow.contrib.cudnn_rnn as rnn
 import tensorflow.distributions as dist
 from functools import reduce
@@ -161,34 +162,76 @@ class GroupedPolicy(Policy):
         return tf.concat([policy.sample() for policy in self.PolicyGroup], axis=-1)
 
 
-class CategoricalPolicy(Policy):
+class GatedPolicy(Policy):
 
-    def __init__(self, inputs, num_categories, name="CategoricalPolicy"):
+    def __init__(self, gates, name="GatedPolicy"):
         super().__init__(name)
+        self.Gates = self.__preprocess_gates__(gates)
+
+    def num_outputs(self):
+        raise NotImplementedError
+
+    def mode(self):
+        raise NotImplementedError
+
+    def log_prob(self, x):
+        logp = self.__log_prob__(x)
+        if self.Gates is not None:
+            logp = tf.where(self.Gates, logp, tf.zeros_like(logp))
+        return logp
+
+    def entropy(self):
+        entropy = self.__entropy__()
+        if self.Gates is not None:
+            entropy = tf.where(self.Gates, entropy, tf.stop_gradient(entropy))
+        return entropy
+
+    def sample(self):
+        raise NotImplementedError
+
+    def __preprocess_gates__(self, gates):
+        raise NotImplementedError
+
+    def __entropy__(self):
+        raise NotImplementedError
+
+    def __log_prob__(self, x):
+        raise NotImplementedError
+
+
+class CategoricalPolicy(GatedPolicy):
+
+    def __init__(self, inputs, num_categories, gates=None, name="CategoricalPolicy"):
         self.Logits = __build_dense__(inputs, num_categories, name=name)
         self.Distribution = dist.Categorical(logits=self.Logits)
         self.NumCategories = num_categories
+        self.Sample = tf.expand_dims(tf.cast(self.Distribution.sample(), tf.float32), axis=1)
+
+        super().__init__(gates, name)
 
     def num_outputs(self):
         return 1
 
     def mode(self):
-        return tf.expand_dims(tf.cast(tf.argmax(self.Logits, axis=-1), tf.float32) + 0.25, axis=1)
-
-    def log_prob(self, x):
-        return tf.expand_dims(self.Distribution.log_prob(tf.cast(tf.squeeze(x, axis=-1), tf.int32)), axis=1)
-
-    def entropy(self):
-        return tf.expand_dims(self.Distribution.entropy(), axis=1)
+        return tf.expand_dims(tf.cast(tf.argmax(self.Logits, axis=-1), tf.float32), axis=1)
 
     def sample(self):
-        return tf.expand_dims(tf.cast(self.Distribution.sample(), tf.float32) + 0.25, axis=1)
+        return self.Sample
+
+    def __log_prob__(self, x):
+        return tf.expand_dims(self.Distribution.log_prob(tf.cast(tf.squeeze(x, axis=-1), tf.int32)), axis=1)
+
+    def __entropy__(self):
+        return tf.expand_dims(self.Distribution.entropy(), axis=1)
+
+    def __preprocess_gates__(self, gates):
+        return gates
 
 
-class ContinuousPolicy(Policy):
+class ContinuousPolicy(GatedPolicy):
 
-    def __init__(self, inputs, num_outputs, scale=1.0, name="ContinuousPolicy"):
-        super().__init__(name)
+    def __init__(self, inputs, num_outputs, scale=1.0, gates=None, name="ContinuousPolicy"):
+        self.NumOutputs = num_outputs
         self.Alpha = __build_dense__(inputs, num_outputs,
                                      activation=tf.nn.softplus,
                                      name=name + "_Alpha") + 1
@@ -198,26 +241,37 @@ class ContinuousPolicy(Policy):
         self.Distribution = dist.Beta(self.Alpha, self.Beta)
         self.Scale = scale
 
+        super().__init__(gates, name)
+
     def num_outputs(self):
         return self.Alpha.shape.dims[-1]
 
     def mode(self):
         return ((self.Alpha - 1.0) / (self.Alpha + self.Beta - 2.0)) * self.Scale
 
-    def log_prob(self, x):
-        return self.Distribution.log_prob(x / self.Scale)
-
-    def entropy(self):
-        return self.Distribution.entropy() + tf.log(self.Scale)
-
     def sample(self):
         return self.Distribution.sample() * self.Scale
+
+    def __log_prob__(self, x):
+        logp = self.Distribution.log_prob(x / self.Scale)
+        if self.Gates is not None:
+            logp = tf.where(self.Gates, logp, tf.zeros_like(logp))
+        return logp
+
+    def __entropy__(self):
+        entropy = self.Distribution.entropy() + tf.log(self.Scale)
+        if self.Gates is not None:
+            entropy = tf.where(self.Gates, entropy, tf.stop_gradient(entropy))
+        return entropy
+
+    def __preprocess_gates__(self, gates):
+        return tf.tile(gates, [1, self.NumOutputs]) if gates.shape[-1] == 1 else gates
 
 
 class RunningStatistics:
 
     def __init__(self, num_features, epsilon=1e-8):
-        self.Epsilon = epsilon
+        self.Epsilon = tf.convert_to_tensor(epsilon, dtype=tf.float64)
         self.MeanInput = tf.placeholder(name="mean", shape=(1, num_features), dtype=tf.float64)
         self.VarInput = tf.placeholder(name="variance", shape=(1, num_features), dtype=tf.float64)
         self.CountInput = tf.placeholder(name="count", shape=(), dtype=tf.int64)
@@ -280,9 +334,8 @@ class Model:
 
         with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
             running_stats = RunningStatistics(Model.FEATURE_COUNT)
-            hidden_cell = rnn.CudnnLSTM(1, Model.HIDDEN_STATE_COUNT, kernel_initializer=init.orthogonal(),
-                                        name="%s_HState" % name)
 
+            total_number_tariffs = Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS
             inputs_shape = inputs.shape
 
             mask = tf.convert_to_tensor([*([False] * 4), *([True] * 3),
@@ -290,95 +343,24 @@ class Model:
                                          *([True] * 194), *([*([False] * 14), *([True] * 22)] * 20)])
             normalized_inputs = tf.reshape(inputs, [-1, Model.FEATURE_COUNT])
             normalized_inputs = running_stats(normalized_inputs, mask)
-            embedding = tf.split(normalized_inputs, [7, 120, 5, 168, 26,
-                                                     *([36] * Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS)],
-                                 axis=-1)
+            normalized_inputs = tf.split(normalized_inputs, [7, 120, 5, 168, 26,
+                                                             *([36] * total_number_tariffs)], axis=-1)
 
-            current_weather = tf.transpose(tf.reshape(embedding[2], (-1, 1, 5)), (0, 2, 1))
-            forecast_embedding = tf.transpose(tf.reshape(embedding[1], (-1, 24, 5)), (0, 2, 1))
-            weather_embedding = tf.concat([current_weather, forecast_embedding], axis=2)
-            weather_embedding = __build_conv_embedding__(weather_embedding,
-                                                         Model.WEATHER_EMBEDDING_COUNT,
-                                                         activation=tf.nn.relu,
-                                                         initializer=init.orthogonal(np.sqrt(2)),
-                                                         bias_initializer=init.zeros(),
-                                                         ksizes=(3, 3, 3, 5), ssizes=(1, 2, 2, 1),
-                                                         name="WeatherEmbedding")
+            embedding = Model.__build_input_embedding__(normalized_inputs)
+            embedding = tf.reshape(embedding, [inputs_shape.dims[0], -1, embedding.shape.dims[-1]])
+            hidden_cell = rnn.CudnnLSTM(1, Model.HIDDEN_STATE_COUNT, kernel_initializer=init.orthogonal(),
+                                        name="%s_HState" % name)
 
-            market_embedding = tf.reshape(embedding[3], (-1, 7, 24))
-            market_embedding = __build_conv_embedding__(market_embedding,
-                                                        Model.MARKET_EMBEDDING_COUNT,
-                                                        activation=tf.nn.relu,
-                                                        initializer=init.orthogonal(np.sqrt(2)),
-                                                        bias_initializer=init.zeros(),
-                                                        name="MarketEmbedding")
-
-            tariff_embeddings = []
-            for idx in range(Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS):
-                tariff_embedding = embedding[-(idx + 1)]
-                tariff_embedding = tf.split(tariff_embedding, [14, 22], axis=-1)
-                tariff_embedding[0] = __build_dense__(tariff_embedding[0], Model.TARIFF_TYPE_EMBEDDING_COUNT,
-                                                      name="TariffTypeEmbedding")
-                tariff_embeddings.append(__build_embedding__(tf.concat(tariff_embedding, axis=-1),
-                                                             Model.TARIFF_EMBEDDING_COUNT,
-                                                             activation=tf.nn.relu,
-                                                             initializer=init.orthogonal(np.sqrt(2)),
-                                                             name="TariffEmbedding"))
-
-            tariff_embeddings = tf.concat(tariff_embeddings, axis=-1)
-            embedding = tf.concat([embedding[0], embedding[4],
-                                   weather_embedding,
-                                   market_embedding,
-                                   tariff_embeddings], axis=-1)
-
-            embedding = __build_dense__(embedding,
-                                        Model.EMBEDDING_COUNT,
-                                        activation=tf.nn.relu,
-                                        initializer=init.orthogonal(np.sqrt(2)),
-                                        name="Embedding")
-            reshaped_embedding = tf.reshape(embedding, [inputs_shape.dims[0], -1, embedding.shape.dims[-1]])
-
-            hidden_state, hidden_tuple_out = hidden_cell(reshaped_embedding, tuple(state_tuple_in))
+            hidden_state, hidden_tuple_out = hidden_cell(embedding, tuple(state_tuple_in))
             hidden_state = tf.reshape(hidden_state, [-1, Model.HIDDEN_STATE_COUNT])
 
-            market_actions = GroupedPolicy([CategoricalPolicy(hidden_state, 3, name="MarketAction")
-                                            for _ in range(Model.NUM_ENABLED_TIMESLOT)])
-            market_prices = ContinuousPolicy(hidden_state, Model.NUM_ENABLED_TIMESLOT, scale=50.0,
-                                             name="MarketPrice")
-            market_quantities = ContinuousPolicy(hidden_state, Model.NUM_ENABLED_TIMESLOT, scale=100.0,
-                                                 name="MarketQuantity")
-            market_policies = GroupedPolicy([market_actions, market_prices, market_quantities], name="MarketPolicy")
-
-            tariff_policies = GroupedPolicy([GroupedPolicy([CategoricalPolicy(hidden_state,
-                                                                              Model.TARIFF_SLOTS_PER_ACTOR,
-                                                                              name="TariffNumber_%d" % idx),
-                                                            CategoricalPolicy(hidden_state, 5,
-                                                                              name="TariffAction_%d" % idx),
-                                                            CategoricalPolicy(hidden_state, 13,
-                                                                              name="PowerType_%d" % idx),
-                                                            ContinuousPolicy(hidden_state, 6, scale=0.25,
-                                                                             name="VF_%d" % idx),
-                                                            ContinuousPolicy(hidden_state, 6,
-                                                                             name="VR_%d" % idx),
-                                                            ContinuousPolicy(hidden_state, 1, scale=0.25,
-                                                                             name="FF_%d" % idx),
-                                                            ContinuousPolicy(hidden_state, 1,
-                                                                             name="FR_%d" % idx),
-                                                            ContinuousPolicy(hidden_state, 2, scale=0.5,
-                                                                             name="REG_%d" % idx),
-                                                            ContinuousPolicy(hidden_state, 1, scale=5.0,
-                                                                             name="PP_%d" % idx),
-                                                            ContinuousPolicy(hidden_state, 1, scale=10.0,
-                                                                             name="EWP_%d" % idx)],
-                                                           name="TariffPolicy_%d" % idx)
-                                             for idx in range(1, Model.TARIFF_ACTORS + 1)])
+            market_policies = Model.__build_market_policies__(hidden_state)
+            tariff_policies = Model.__build_tariff_policies__(hidden_state)
 
             self.Name = name
             self.Inputs = inputs
-            self.NormalizedInputs = normalized_inputs
             self.Embedding = embedding
             self.RunningStats = running_stats
-            self.HiddenState = hidden_state
             self.StateTupleOut = hidden_tuple_out
             self.Policies = GroupedPolicy([market_policies, tariff_policies], name="Policy")
             self.StateValue = __build_dense__(hidden_state, 1, name="StateValue")
@@ -388,6 +370,104 @@ class Model:
     @ property
     def variables(self):
         return tf.trainable_variables(self.Name)
+
+    @staticmethod
+    def __build_input_embedding__(normalized_inputs):
+        current_weather = tf.transpose(tf.reshape(normalized_inputs[2], (-1, 1, 5)), (0, 2, 1))
+        forecast_embedding = tf.transpose(tf.reshape(normalized_inputs[1], (-1, 24, 5)), (0, 2, 1))
+        weather_embedding = tf.concat([current_weather, forecast_embedding], axis=2)
+        weather_embedding = __build_conv_embedding__(weather_embedding,
+                                                     Model.WEATHER_EMBEDDING_COUNT,
+                                                     activation=tf.nn.relu,
+                                                     initializer=init.orthogonal(np.sqrt(2)),
+                                                     bias_initializer=init.zeros(),
+                                                     ksizes=(3, 3, 3, 5), ssizes=(1, 2, 2, 1),
+                                                     name="WeatherEmbedding")
+
+        market_embedding = tf.reshape(normalized_inputs[3], (-1, 7, 24))
+        market_embedding = __build_conv_embedding__(market_embedding,
+                                                    Model.MARKET_EMBEDDING_COUNT,
+                                                    activation=tf.nn.relu,
+                                                    initializer=init.orthogonal(np.sqrt(2)),
+                                                    bias_initializer=init.zeros(),
+                                                    name="MarketEmbedding")
+
+        tariff_embeddings = []
+        for idx in range(Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS):
+            tariff_embedding = normalized_inputs[-(idx + 1)]
+            tariff_embedding = tf.split(tariff_embedding, [14, 22], axis=-1)
+            tariff_embedding[0] = __build_dense__(tariff_embedding[0], Model.TARIFF_TYPE_EMBEDDING_COUNT,
+                                                  name="TariffTypeEmbedding")
+            tariff_embeddings.append(__build_embedding__(tf.concat(tariff_embedding, axis=-1),
+                                                         Model.TARIFF_EMBEDDING_COUNT,
+                                                         activation=tf.nn.relu,
+                                                         initializer=init.orthogonal(np.sqrt(2)),
+                                                         name="TariffEmbedding"))
+
+        tariff_embeddings = tf.concat(tariff_embeddings, axis=-1)
+        embedding = tf.concat([normalized_inputs[0], normalized_inputs[4],
+                               weather_embedding,
+                               market_embedding,
+                               tariff_embeddings], axis=-1)
+
+        embedding = __build_dense__(embedding,
+                                    Model.EMBEDDING_COUNT,
+                                    activation=tf.nn.relu,
+                                    initializer=init.orthogonal(np.sqrt(2)),
+                                    name="Embedding")
+
+        return embedding
+
+    @staticmethod
+    def __build_market_policies__(state):
+        market_actions = GroupedPolicy([CategoricalPolicy(state, 3, name="MarketAction")
+                                        for _ in range(Model.NUM_ENABLED_TIMESLOT)])
+        market_gates = tf.greater(market_actions.sample(), 0)
+        market_prices = ContinuousPolicy(state, Model.NUM_ENABLED_TIMESLOT, scale=50.0,
+                                         gates=market_gates,
+                                         name="MarketPrice")
+        market_quantities = ContinuousPolicy(state, Model.NUM_ENABLED_TIMESLOT, scale=100.0,
+                                             gates=market_gates,
+                                             name="MarketQuantity")
+        market_policies = GroupedPolicy([market_actions, market_prices, market_quantities], name="MarketPolicy")
+
+        return market_policies
+
+    @staticmethod
+    def __build_tariff_policies__(state):
+        tariff_policies = []
+        for idx in range(1, Model.TARIFF_ACTORS + 1):
+            t_action = CategoricalPolicy(state, 5, name="TariffAction_%d" % idx)
+
+            activate_gates = tf.equal(t_action.sample(), 4)
+            t_number = CategoricalPolicy(state, Model.TARIFF_SLOTS_PER_ACTOR,
+                                         gates=tf.greater(t_action.sample(), 0),
+                                         name="TariffNumber_%d" % idx)
+            p_type = CategoricalPolicy(state, 13, gates=activate_gates, name="PowerType_%d" % idx)
+
+            interruptible_gates = tf.logical_or(tf.logical_or(tf.logical_or(
+                tf.equal(p_type.sample(), 0),
+                tf.equal(p_type.sample(), 3)),
+                tf.equal(p_type.sample(), 5)),
+                tf.equal(p_type.sample(), 11))
+            storage_gates = tf.logical_or(interruptible_gates, tf.equal(p_type.sample(), 10))
+            reg_gates = tf.logical_and(activate_gates, storage_gates)
+            curtailment_gates = tf.logical_and(activate_gates, interruptible_gates)
+
+            v_f = ContinuousPolicy(state, 6, scale=0.25, gates=activate_gates, name="VF_%d" % idx)
+            v_c = ContinuousPolicy(state, 6, gates=curtailment_gates, name="VC_%d" % idx)
+            f_f = ContinuousPolicy(state, 1, scale=0.25, gates=tf.greater(t_action.sample(), 1),
+                                   name="FF_%d" % idx)
+            f_c = ContinuousPolicy(state, 1, gates=curtailment_gates, name="FC_%d" % idx)
+            reg = ContinuousPolicy(state, 2, scale=0.5, gates=reg_gates, name="REG_%d" % idx)
+            pp = ContinuousPolicy(state, 1, scale=5.0, gates=activate_gates, name="PP_%d" % idx)
+            ewp = ContinuousPolicy(state, 1, scale=10.0, gates=activate_gates, name="EWP_%d" % idx)
+
+            tariff_policies.append(GroupedPolicy([t_number, t_action, p_type, v_f, v_c, f_f, f_c, reg, pp, ewp],
+                                                 name="TariffPolicy_%d" % idx))
+        tariff_policies = GroupedPolicy(tariff_policies, name="TariffPolicies")
+
+        return tariff_policies
 
     @staticmethod
     def create_transfer_op(srcmodel, dstmodel):
