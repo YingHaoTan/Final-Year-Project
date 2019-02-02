@@ -60,7 +60,6 @@ import tensorflow as tf
 import tensorflow.layers as layers
 import tensorflow.initializers as init
 import tensorflow.contrib.layers as clayers
-import tensorflow.contrib.compiler.xla as xla
 import tensorflow.contrib.cudnn_rnn as rnn
 import tensorflow.distributions as dist
 from functools import reduce
@@ -155,8 +154,8 @@ class GroupedPolicy(Policy):
         return tf.concat(logprobs, axis=1)
 
     def entropy(self):
-        return tf.reduce_sum(tf.concat([policy.entropy() for policy in self.PolicyGroup], axis=-1), axis=-1,
-                             keepdims=True)
+        return tf.reduce_sum(tf.concat([policy.entropy() for policy in self.PolicyGroup], axis=1),
+                             axis=1, keepdims=True)
 
     def sample(self):
         return tf.concat([policy.sample() for policy in self.PolicyGroup], axis=-1)
@@ -175,27 +174,34 @@ class GatedPolicy(Policy):
         raise NotImplementedError
 
     def log_prob(self, x):
-        logp = self.__log_prob__(x)
-        if self.Gates is not None:
-            logp = tf.where(self.Gates, logp, tf.zeros_like(logp))
+        if self.Gates is None:
+            logp = self.__log_prob__(x)
+        else:
+            nan_positions = tf.is_nan(x)
+            logp = self.__log_prob__(tf.where(nan_positions, tf.stop_gradient(self.__sample__), x))
+            mask = tf.cast(tf.logical_not(nan_positions), tf.float32)
+            logp = mask * logp
+
         return logp
 
-    def entropy(self):
-        entropy = self.__entropy__()
-        if self.Gates is not None:
-            entropy = tf.where(self.Gates, entropy, tf.stop_gradient(entropy))
-        return entropy
-
     def sample(self):
+        sample_values = self.__sample__
+        if self.Gates is not None:
+            nans = tf.zeros_like(sample_values) / tf.zeros_like(sample_values)
+            sample_values = tf.where(self.Gates, sample_values, nans)
+        return sample_values
+
+    def entropy(self):
         raise NotImplementedError
 
     def __preprocess_gates__(self, gates):
         raise NotImplementedError
 
-    def __entropy__(self):
+    def __log_prob__(self, x):
         raise NotImplementedError
 
-    def __log_prob__(self, x):
+    @property
+    def __sample__(self):
         raise NotImplementedError
 
 
@@ -205,7 +211,7 @@ class CategoricalPolicy(GatedPolicy):
         self.Logits = __build_dense__(inputs, num_categories, name=name)
         self.Distribution = dist.Categorical(logits=self.Logits)
         self.NumCategories = num_categories
-        self.Sample = tf.expand_dims(tf.cast(self.Distribution.sample(), tf.float32), axis=1)
+        self.___sample___ = tf.expand_dims(tf.cast(self.Distribution.sample(), tf.float32), axis=1)
 
         super().__init__(gates, name)
 
@@ -215,17 +221,18 @@ class CategoricalPolicy(GatedPolicy):
     def mode(self):
         return tf.expand_dims(tf.cast(tf.argmax(self.Logits, axis=-1), tf.float32), axis=1)
 
-    def sample(self):
-        return self.Sample
+    def entropy(self):
+        return tf.expand_dims(self.Distribution.entropy(), axis=1)
 
     def __log_prob__(self, x):
         return tf.expand_dims(self.Distribution.log_prob(tf.cast(tf.squeeze(x, axis=-1), tf.int32)), axis=1)
 
-    def __entropy__(self):
-        return tf.expand_dims(self.Distribution.entropy(), axis=1)
-
     def __preprocess_gates__(self, gates):
         return gates
+
+    @property
+    def __sample__(self):
+        return self.___sample___
 
 
 class ContinuousPolicy(GatedPolicy):
@@ -240,6 +247,7 @@ class ContinuousPolicy(GatedPolicy):
                                     name=name + "_Beta") + 1
         self.Distribution = dist.Beta(self.Alpha, self.Beta)
         self.Scale = scale
+        self.___sample___ = self.Distribution.sample() * self.Scale
 
         super().__init__(gates, name)
 
@@ -249,23 +257,18 @@ class ContinuousPolicy(GatedPolicy):
     def mode(self):
         return ((self.Alpha - 1.0) / (self.Alpha + self.Beta - 2.0)) * self.Scale
 
-    def sample(self):
-        return self.Distribution.sample() * self.Scale
+    def entropy(self):
+        return self.Distribution.entropy() + tf.log(self.Scale)
 
     def __log_prob__(self, x):
-        logp = self.Distribution.log_prob(x / self.Scale)
-        if self.Gates is not None:
-            logp = tf.where(self.Gates, logp, tf.zeros_like(logp))
-        return logp
-
-    def __entropy__(self):
-        entropy = self.Distribution.entropy() + tf.log(self.Scale)
-        if self.Gates is not None:
-            entropy = tf.where(self.Gates, entropy, tf.stop_gradient(entropy))
-        return entropy
+        return self.Distribution.log_prob(x / self.Scale)
 
     def __preprocess_gates__(self, gates):
         return tf.tile(gates, [1, self.NumOutputs]) if gates.shape[-1] == 1 else gates
+
+    @property
+    def __sample__(self):
+        return self.___sample___
 
 
 class RunningStatistics:
@@ -450,9 +453,15 @@ class Model:
                 tf.equal(p_type.sample(), 3)),
                 tf.equal(p_type.sample(), 5)),
                 tf.equal(p_type.sample(), 11))
-            storage_gates = tf.logical_or(interruptible_gates, tf.equal(p_type.sample(), 10))
+            storage_gates = tf.logical_or(tf.logical_or(tf.logical_or(tf.logical_or(
+                tf.equal(p_type.sample(), 0),
+                tf.equal(p_type.sample(), 3)),
+                tf.equal(p_type.sample(), 7)),
+                tf.equal(p_type.sample(), 10)),
+                tf.equal(p_type.sample(), 11))
             reg_gates = tf.logical_and(activate_gates, storage_gates)
-            curtailment_gates = tf.logical_and(activate_gates, interruptible_gates)
+            curtailment_gates = tf.logical_and(activate_gates,
+                                               tf.logical_and(tf.logical_not(storage_gates), interruptible_gates))
 
             v_f = ContinuousPolicy(state, 6, scale=0.25, gates=activate_gates, name="VF_%d" % idx)
             v_c = ContinuousPolicy(state, 6, gates=curtailment_gates, name="VC_%d" % idx)

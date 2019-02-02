@@ -83,7 +83,7 @@ value_clipped = d_value + tf.clip_by_value(value_prediction - d_value, -PPO_EPSI
 value_clipped_loss = (value_clipped - d_reward) ** 2
 value_unclipped_loss = (value_prediction - d_reward) ** 2
 value_loss = 0.5 * tf.reduce_mean(tf.maximum(value_clipped, value_unclipped_loss))
-entropy_loss = 0.01 * tf.reduce_mean(cmodel.Policies.entropy())
+entropy_loss = 0.01 * tf.reduce_mean(cmodel.Policies.entropy(d_action))
 loss = policy_loss + value_loss - entropy_loss
 
 warmup_steps = WARMUP_PHASE * NUM_MINIBATCH

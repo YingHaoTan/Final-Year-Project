@@ -174,7 +174,8 @@ class PowerTACGameHook(AgentServerHook):
                                                             "config/broker%d.properties" % index],
                                                            cwd=Directory.EXECUTABLE_DIR,
                                                            stdin=subprocess.PIPE,
-                                                           stdout=subprocess.PIPE)
+                                                           stdout=subprocess.PIPE,
+                                                           stderr=subprocess.PIPE)
 
         self.BootstrapManager.start_bootstrap(self.Name)
         self.SemaphoreAcquired = True
@@ -236,6 +237,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
         self.__log_prob_rollouts__ = numpy.zeros(shape=(rollout_size, num_clients, self.Model.ACTION_COUNT),
                                                  dtype=numpy.float32)
         self.__rollout_index__ = 0
+
         self.StepOp = [step_op,
                        tf.squeeze(self.Model.StateValue, axis=-1),
                        self.Model.Policies.log_prob(self.StepOp),
@@ -247,6 +249,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
         p_array = numpy.zeros(shape=(1, self.ClientCount), dtype=numpy.float32)
         sorted_indices = numpy.argsort(cash, axis=1)
         last_idx = 0
+
         for idx in range(self.ClientCount):
             current_cash = cash[0, sorted_indices[0, idx]]
             if idx == self.ClientCount - 1 or cash[0, sorted_indices[0, idx + 1]] > current_cash:
