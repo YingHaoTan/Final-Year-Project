@@ -16,9 +16,10 @@ PPO_EPSILON = 0.2
 PORT = 61000
 PT_PORT = 60000
 ROLLOUT_STEPS = 168
+NBATCHES = 15
 BUFFER_SIZE = 630
 NUM_MINIBATCH = 21
-NUM_EPOCHS = 20
+NUM_EPOCHS = 16
 MAX_EPOCHS = 1000 * NUM_EPOCHS
 WARMUP_PHASE = 5 * NUM_EPOCHS
 MAX_PHASE = 200 * NUM_EPOCHS
@@ -129,8 +130,8 @@ summary_writer = tf.summary.FileWriter(SUMMARY_DIR, graph=tf.get_default_graph()
 bootstrap_manager = core.BootstrapManager()
 servers = [server.Server(NUM_CLIENTS[idx], PORT + idx,
                          core.PowerTACRolloutHook(model.Model, NUM_CLIENTS[idx], PT_PORT + idx,
-                                                  CPU_SEMAPHORE, bootstrap_manager, ROLLOUT_STEPS, ROLLOUT_QUEUE,
-                                                  alt_model.Name, 0.2, gamma_op, LAMBDA,
+                                                  CPU_SEMAPHORE, bootstrap_manager, ROLLOUT_STEPS, NBATCHES,
+                                                  ROLLOUT_QUEUE, alt_model.Name, 0.2, gamma_op, LAMBDA,
                                                   name="Game%02d" % idx))
            for idx in range(len(NUM_CLIENTS))]
 
