@@ -219,7 +219,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
                               lambda: tf.concat([self.StepOp[:-1, :], model.EvaluationOp], axis=0),
                               lambda: self.StepOp)
 
-        self.ModelVersion = self.NBatches
+        self.ModelVersion = nbatches
         self.ExpectedModelVersion = 0
         self.NSteps = nsteps
         self.NBatches = nbatches
