@@ -165,15 +165,15 @@ class BooleanPolicy(Policy):
 
     def __init__(self, inputs, name="BooleanPolicy"):
         super().__init__(name)
-        self.Logits = __build_dense__(inputs, 1, name=name)
-        self.Distribution = distributions.Bernoulli(logits=self.Logits)
-        self.__sample__ = tf.cast(self.Distribution.sample(), tf.float32)
+        self.Probability = tf.squeeze(__build_dense__(inputs, 1, name=name), axis=-1)
+        self.Distribution = distributions.Bernoulli(logits=self.Probability)
+        self.__sample__ = tf.expand_dims(tf.cast(self.Distribution.sample(), tf.float32), axis=1)
 
     def num_outputs(self):
         return 1
 
     def mode(self):
-        return tf.expand_dims(tf.cast(tf.argmax(self.Logits, axis=-1), tf.float32), axis=1)
+        return tf.expand_dims(tf.cast(tf.greater(self.Probability, 0.5), tf.float32), axis=1)
 
     def entropy(self):
         return self.Distribution.entropy()
@@ -260,7 +260,7 @@ class BetaPolicy(Policy):
         return self.Distribution.entropy()
 
     def log_prob(self, x):
-        return self.Distribution.log_prob(x)
+        return tf.reduce_sum(self.Distribution.log_prob(x), axis=1)
 
     def sample(self):
         return self.__sample__
