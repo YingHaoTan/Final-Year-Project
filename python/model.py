@@ -167,7 +167,7 @@ class BooleanPolicy(Policy):
         super().__init__(name)
         self.Logits = __build_dense__(inputs, 1, name=name)
         self.Distribution = distributions.Bernoulli(logits=self.Logits)
-        self.__sample__ = tf.expand_dims(tf.cast(self.Distribution.sample(), tf.float32), axis=1)
+        self.__sample__ = tf.cast(self.Distribution.sample(), tf.float32)
 
     def num_outputs(self):
         return 1
