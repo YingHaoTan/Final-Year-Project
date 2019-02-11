@@ -42,7 +42,7 @@ Inputs:
 
 Outputs:
     Market Outputs:
-        24 category valued policy representing None, Buy, Sell
+        24 boolean valued policy representing NoOp, Transact
         24 continuous valued policy representing price value to perform bid/ask
         24 continuous valued policy representing quantity value to perform bid/ask
 
@@ -61,7 +61,7 @@ import tensorflow.layers as layers
 import tensorflow.initializers as init
 import tensorflow.contrib.layers as clayers
 import tensorflow.contrib.cudnn_rnn as rnn
-import tensorflow.distributions as dist
+from tensorflow_probability import distributions
 from functools import reduce
 import numpy as np
 
@@ -148,72 +148,26 @@ class GroupedPolicy(Policy):
         index = 0
         for policy in self.PolicyGroup:
             nindex = index + policy.num_outputs()
-            logprobs.append(policy.log_prob(x[:, index: nindex]))
+            logprobs.append(tf.reshape(policy.log_prob(x[:, index: nindex]), (-1, 1)))
             index = nindex
 
-        return tf.concat(logprobs, axis=1)
+        return tf.reduce_sum(tf.concat(logprobs, axis=1), axis=1)
 
     def entropy(self):
-        return tf.reduce_sum(tf.concat([policy.entropy() for policy in self.PolicyGroup], axis=1),
-                             axis=1, keepdims=True)
+        return tf.reduce_sum(tf.concat([tf.reshape(policy.entropy(), (-1, 1))
+                                        for policy in self.PolicyGroup], axis=1), axis=1)
 
     def sample(self):
         return tf.concat([policy.sample() for policy in self.PolicyGroup], axis=-1)
 
 
-class GatedPolicy(Policy):
+class BooleanPolicy(Policy):
 
-    def __init__(self, gates, name="GatedPolicy"):
+    def __init__(self, inputs, name="BooleanPolicy"):
         super().__init__(name)
-        self.Gates = self.__preprocess_gates__(gates)
-
-    def num_outputs(self):
-        raise NotImplementedError
-
-    def mode(self):
-        raise NotImplementedError
-
-    def log_prob(self, x):
-        if self.Gates is None:
-            logp = self.__log_prob__(x)
-        else:
-            nan_positions = tf.is_nan(x)
-            logp = self.__log_prob__(tf.where(nan_positions, tf.stop_gradient(self.__sample__), x))
-            mask = tf.cast(tf.logical_not(nan_positions), tf.float32)
-            logp = mask * logp
-
-        return logp
-
-    def sample(self):
-        sample_values = self.__sample__
-        if self.Gates is not None:
-            nans = tf.zeros_like(sample_values) / tf.zeros_like(sample_values)
-            sample_values = tf.where(self.Gates, sample_values, nans)
-        return sample_values
-
-    def entropy(self):
-        raise NotImplementedError
-
-    def __preprocess_gates__(self, gates):
-        raise NotImplementedError
-
-    def __log_prob__(self, x):
-        raise NotImplementedError
-
-    @property
-    def __sample__(self):
-        raise NotImplementedError
-
-
-class CategoricalPolicy(GatedPolicy):
-
-    def __init__(self, inputs, num_categories, gates=None, name="CategoricalPolicy"):
-        self.Logits = __build_dense__(inputs, num_categories, name=name)
-        self.Distribution = dist.Categorical(logits=self.Logits)
-        self.NumCategories = num_categories
-        self.___sample___ = tf.expand_dims(tf.cast(self.Distribution.sample(), tf.float32), axis=1)
-
-        super().__init__(gates, name)
+        self.Logits = __build_dense__(inputs, 1, name=name)
+        self.Distribution = distributions.Bernoulli(logits=self.Logits)
+        self.__sample__ = tf.expand_dims(tf.cast(self.Distribution.sample(), tf.float32), axis=1)
 
     def num_outputs(self):
         return 1
@@ -222,53 +176,94 @@ class CategoricalPolicy(GatedPolicy):
         return tf.expand_dims(tf.cast(tf.argmax(self.Logits, axis=-1), tf.float32), axis=1)
 
     def entropy(self):
-        return tf.expand_dims(self.Distribution.entropy(), axis=1)
+        return self.Distribution.entropy()
 
-    def __log_prob__(self, x):
-        return tf.expand_dims(self.Distribution.log_prob(tf.cast(tf.squeeze(x, axis=-1), tf.int32)), axis=1)
+    def log_prob(self, x):
+        return self.Distribution.log_prob(tf.cast(tf.squeeze(x, axis=-1), tf.int32))
 
-    def __preprocess_gates__(self, gates):
-        return gates
-
-    @property
-    def __sample__(self):
-        return self.___sample___
+    def sample(self):
+        return self.__sample__
 
 
-class ContinuousPolicy(GatedPolicy):
+class CategoricalPolicy(Policy):
 
-    def __init__(self, inputs, num_outputs, scale=1.0, gates=None, name="ContinuousPolicy"):
-        self.NumOutputs = num_outputs
-        self.Alpha = __build_dense__(inputs, num_outputs,
-                                     activation=tf.nn.softplus,
-                                     name=name + "_Alpha") + 1
-        self.Beta = __build_dense__(inputs, num_outputs,
-                                    activation=tf.nn.softplus,
-                                    name=name + "_Beta") + 1
-        self.Distribution = dist.Beta(self.Alpha, self.Beta)
-        self.Scale = scale
-        self.___sample___ = self.Distribution.sample() * self.Scale
-
-        super().__init__(gates, name)
+    def __init__(self, inputs, num_categories, name="CategoricalPolicy"):
+        super().__init__(name)
+        self.Logits = __build_dense__(inputs, num_categories, name=name)
+        self.Distribution = distributions.Categorical(logits=self.Logits)
+        self.NumCategories = num_categories
+        self.__sample__ = tf.expand_dims(tf.cast(self.Distribution.sample(), tf.float32), axis=1)
 
     def num_outputs(self):
-        return self.Alpha.shape.dims[-1]
+        return 1
 
     def mode(self):
-        return ((self.Alpha - 1.0) / (self.Alpha + self.Beta - 2.0)) * self.Scale
+        return tf.expand_dims(tf.cast(tf.argmax(self.Logits, axis=-1), tf.float32), axis=1)
 
     def entropy(self):
-        return self.Distribution.entropy() + tf.log(self.Scale)
+        return self.Distribution.entropy()
 
-    def __log_prob__(self, x):
-        return self.Distribution.log_prob(x / self.Scale)
+    def log_prob(self, x):
+        return self.Distribution.log_prob(tf.cast(tf.squeeze(x, axis=-1), tf.int32))
 
-    def __preprocess_gates__(self, gates):
-        return tf.tile(gates, [1, self.NumOutputs]) if gates.shape[-1] == 1 else gates
+    def sample(self):
+        return self.__sample__
 
-    @property
-    def __sample__(self):
-        return self.___sample___
+
+class GaussianPolicy(Policy):
+
+    def __init__(self, inputs, num_outputs, name="ContinuousPolicy"):
+        super().__init__(name)
+        self.NumOutputs = num_outputs
+        self.Mean = __build_dense__(inputs, num_outputs, name=name + "%s/mean" % name)
+        self.Std = tf.exp(tf.get_variable(name='%s/std' % name, shape=num_outputs, initializer=init.zeros(),
+                                          trainable=True))
+        self.Distribution = distributions.MultivariateNormalDiag(loc=self.Mean, scale_diag=self.Std)
+        self.__sample__ = self.Distribution.sample()
+
+    def num_outputs(self):
+        return self.Mean.shape.dims[-1]
+
+    def mode(self):
+        return self.Mean
+
+    def entropy(self):
+        return self.Distribution.entropy()
+
+    def log_prob(self, x):
+        return self.Distribution.log_prob(x)
+
+    def sample(self):
+        return self.__sample__
+
+
+class BetaPolicy(Policy):
+
+    def __init__(self, inputs, num_outputs, name="BetaPolicy"):
+        super().__init__(name)
+        concentrations = tf.exp(__build_dense__(inputs, num_outputs * 2, name=name + "%s/concentrations" % name)) + 1
+        c0, c1 = tf.split(concentrations, 2, axis=1)
+
+        self.NumOutputs = num_outputs
+        self.Concentration0 = c0
+        self.Concentration1 = c1
+        self.Distribution = distributions.Beta(c1, c0)
+        self.__sample__ = self.Distribution.sample()
+
+    def num_outputs(self):
+        return self.Concentration0.shape.dims[-1]
+
+    def mode(self):
+        return (self.Concentration1 - 1) / (self.Concentration0 + self.Concentration1 - 2)
+
+    def entropy(self):
+        return self.Distribution.entropy()
+
+    def log_prob(self, x):
+        return self.Distribution.log_prob(x)
+
+    def sample(self):
+        return self.__sample__
 
 
 class RunningStatistics:
@@ -423,15 +418,10 @@ class Model:
 
     @staticmethod
     def __build_market_policies__(state):
-        market_actions = GroupedPolicy([CategoricalPolicy(state, 3, name="MarketAction")
+        market_actions = GroupedPolicy([BooleanPolicy(state, name="MarketAction")
                                         for _ in range(Model.NUM_ENABLED_TIMESLOT)])
-        market_gates = tf.greater(market_actions.sample(), 0)
-        market_prices = ContinuousPolicy(state, Model.NUM_ENABLED_TIMESLOT, scale=50.0,
-                                         gates=market_gates,
-                                         name="MarketPrice")
-        market_quantities = ContinuousPolicy(state, Model.NUM_ENABLED_TIMESLOT, scale=100.0,
-                                             gates=market_gates,
-                                             name="MarketQuantity")
+        market_prices = GaussianPolicy(state, Model.NUM_ENABLED_TIMESLOT, name="MarketPrice")
+        market_quantities = GaussianPolicy(state, Model.NUM_ENABLED_TIMESLOT, name="MarketQuantity")
         market_policies = GroupedPolicy([market_actions, market_prices, market_quantities], name="MarketPolicy")
 
         return market_policies
@@ -440,37 +430,17 @@ class Model:
     def __build_tariff_policies__(state):
         tariff_policies = []
         for idx in range(1, Model.TARIFF_ACTORS + 1):
+            t_number = CategoricalPolicy(state, Model.TARIFF_SLOTS_PER_ACTOR, name="TariffNumber_%d" % idx)
             t_action = CategoricalPolicy(state, 5, name="TariffAction_%d" % idx)
+            p_type = CategoricalPolicy(state, 13, name="PowerType_%d" % idx)
 
-            activate_gates = tf.equal(t_action.sample(), 4)
-            t_number = CategoricalPolicy(state, Model.TARIFF_SLOTS_PER_ACTOR,
-                                         gates=tf.greater(t_action.sample(), 0),
-                                         name="TariffNumber_%d" % idx)
-            p_type = CategoricalPolicy(state, 13, gates=activate_gates, name="PowerType_%d" % idx)
-
-            interruptible_gates = tf.logical_or(tf.logical_or(tf.logical_or(
-                tf.equal(p_type.sample(), 0),
-                tf.equal(p_type.sample(), 3)),
-                tf.equal(p_type.sample(), 5)),
-                tf.equal(p_type.sample(), 11))
-            storage_gates = tf.logical_or(tf.logical_or(tf.logical_or(tf.logical_or(
-                tf.equal(p_type.sample(), 0),
-                tf.equal(p_type.sample(), 3)),
-                tf.equal(p_type.sample(), 7)),
-                tf.equal(p_type.sample(), 10)),
-                tf.equal(p_type.sample(), 11))
-            reg_gates = tf.logical_and(activate_gates, storage_gates)
-            curtailment_gates = tf.logical_and(activate_gates,
-                                               tf.logical_and(tf.logical_not(storage_gates), interruptible_gates))
-
-            v_f = ContinuousPolicy(state, 6, scale=0.25, gates=activate_gates, name="VF_%d" % idx)
-            v_c = ContinuousPolicy(state, 6, gates=curtailment_gates, name="VC_%d" % idx)
-            f_f = ContinuousPolicy(state, 1, scale=0.25, gates=tf.greater(t_action.sample(), 1),
-                                   name="FF_%d" % idx)
-            f_c = ContinuousPolicy(state, 1, gates=curtailment_gates, name="FC_%d" % idx)
-            reg = ContinuousPolicy(state, 2, scale=0.5, gates=reg_gates, name="REG_%d" % idx)
-            pp = ContinuousPolicy(state, 1, scale=5.0, gates=activate_gates, name="PP_%d" % idx)
-            ewp = ContinuousPolicy(state, 1, scale=10.0, gates=activate_gates, name="EWP_%d" % idx)
+            v_f = GaussianPolicy(state, 6, name="VF_%d" % idx)
+            v_c = BetaPolicy(state, 6, name="VC_%d" % idx)
+            f_f = GaussianPolicy(state, 1, name="FF_%d" % idx)
+            f_c = BetaPolicy(state, 1, name="FC_%d" % idx)
+            reg = GaussianPolicy(state, 2, name="REG_%d" % idx)
+            pp = GaussianPolicy(state, 1, name="PP_%d" % idx)
+            ewp = GaussianPolicy(state, 1, name="EWP_%d" % idx)
 
             tariff_policies.append(GroupedPolicy([t_number, t_action, p_type, v_f, v_c, f_f, f_c, reg, pp, ewp],
                                                  name="TariffPolicy_%d" % idx))

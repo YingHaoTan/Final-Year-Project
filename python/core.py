@@ -235,8 +235,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
                                                dtype=numpy.float32)
         self.__reward_rollouts__ = numpy.zeros(shape=(nsteps, num_clients), dtype=numpy.float32)
         self.__value_rollouts__ = numpy.zeros(shape=(nsteps, num_clients), dtype=numpy.float32)
-        self.__log_prob_rollouts__ = numpy.zeros(shape=(nsteps, num_clients, self.Model.ACTION_COUNT),
-                                                 dtype=numpy.float32)
+        self.__log_prob_rollouts__ = numpy.zeros(shape=(nsteps, num_clients), dtype=numpy.float32)
         self.__rollout_index__ = 0
 
         self.StepOp = [step_op,
@@ -250,9 +249,6 @@ class PowerTACRolloutHook(PowerTACGameHook):
         p_array = numpy.zeros(shape=(1, self.ClientCount), dtype=numpy.float32)
         sorted_indices = numpy.argsort(cash, axis=1)
         last_idx = 0
-        if numpy.any(numpy.isnan(cash)):
-            print(numpy.where(numpy.isnan(cash)))
-            raise ValueError("Cash NAN Error")
 
         for idx in range(self.ClientCount):
             current_cash = cash[0, sorted_indices[0, idx]]
@@ -317,7 +313,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
                 self.RecvQueue.put((self.__rollout_states__[:, :, idx: idx + 1, :],
                                     self.__observation_rollouts__[:, idx: idx + 1, :],
                                     self.__action_rollouts__[:, idx: idx + 1, :],
-                                    self.__log_prob_rollouts__[:, idx: idx + 1, :],
+                                    self.__log_prob_rollouts__[:, idx: idx + 1],
                                     advantage[:, idx: idx + 1],
                                     reward[:, idx: idx + 1],
                                     self.__value_rollouts__[:, idx: idx + 1]))
@@ -325,7 +321,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
         self.__observation_rollouts__[rollout_idx: rollout_nidx, :, :] = observations[:, :, :]
         self.__action_rollouts__[rollout_idx: rollout_nidx, :, :] = numpy.array([actions])
-        self.__log_prob_rollouts__[rollout_idx: rollout_nidx, :, :] = log_prob
+        self.__log_prob_rollouts__[rollout_idx: rollout_nidx, :] = log_prob
         self.__value_rollouts__[rollout_idx: rollout_nidx, :] = value
         self.__rollout_index__ = self.__rollout_index__ + 1
 

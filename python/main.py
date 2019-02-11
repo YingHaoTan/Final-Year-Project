@@ -19,25 +19,25 @@ ROLLOUT_STEPS = 168
 NBATCHES = 15
 BUFFER_SIZE = 630
 NUM_MINIBATCH = 21
-NUM_EPOCHS = 16
+NUM_EPOCHS = 10
 MAX_EPOCHS = 1000 * NUM_EPOCHS
-WARMUP_PHASE = 5 * NUM_EPOCHS
+WARMUP_PHASE = 1 * NUM_EPOCHS
 MAX_PHASE = 200 * NUM_EPOCHS
-INITIAL_LR = 2.5e-4
-FINAL_LR = 2.5e-5
+INITIAL_LR = 0.0002
+FINAL_LR = 0.00002
 
 NUM_CLIENTS = [4] * 14
 LAMBDA = 0.95
 ROLLOUT_QUEUE = queue.Queue()
 CPU_SEMAPHORE = threading.BoundedSemaphore(1)
 
-
+numpy.warnings.filterwarnings('ignore')
 print("Setting up trainer to perform %d training epochs" % MAX_EPOCHS)
 
 state_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, 2, 1, model.Model.HIDDEN_STATE_COUNT))
 obs_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS, model.Model.FEATURE_COUNT + 1))
 action_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS, model.Model.ACTION_COUNT))
-log_prob_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS, model.Model.ACTION_COUNT))
+log_prob_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS))
 reward_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS))
 advantage_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS))
 value_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS))
@@ -54,7 +54,7 @@ d_state, d_obs, d_action, d_log_prob, d_reward, d_adv, d_value = d_iterator.get_
 d_state = tf.transpose(d_state, (1, 2, 0, 3))
 d_obs = tf.transpose(d_obs, (1, 0, 2))
 d_action = tf.reshape(tf.transpose(d_action, (1, 0, 2)), (-1, model.Model.ACTION_COUNT))
-d_log_prob = tf.reshape(tf.transpose(d_log_prob, (1, 0, 2)), [-1, model.Model.ACTION_COUNT])
+d_log_prob = tf.reshape(tf.transpose(d_log_prob, (1, 0)), [-1])
 d_reward = tf.reshape(tf.transpose(d_reward, (1, 0)), [-1])
 d_adv = tf.reshape(tf.transpose(d_adv, (1, 0)), [-1])
 d_value = tf.reshape(tf.transpose(d_value, (1, 0)), [-1])
@@ -75,10 +75,9 @@ gamma_shift_op = tf.cast(tf.minimum(global_step / (MAX_PHASE * NUM_MINIBATCH), 1
 gamma_op = 0.998 + 0.0017 * gamma_shift_op
 
 d_adv = tf.expand_dims(d_adv, axis=1)
-prob_ratio = tf.exp(tf.reduce_sum(cmodel.Policies.log_prob(d_action) - d_log_prob, axis=-1))
+prob_ratio = tf.exp(cmodel.Policies.log_prob(d_action) - d_log_prob)
 clipped_prob_ratio = tf.clip_by_value(prob_ratio, 1 - PPO_EPSILON, 1 + PPO_EPSILON)
-policy_loss = -tf.reduce_mean(tf.minimum(prob_ratio * d_adv,
-                                         clipped_prob_ratio * d_adv))
+policy_loss = -tf.reduce_mean(tf.minimum(prob_ratio * d_adv, clipped_prob_ratio * d_adv))
 value_prediction = tf.squeeze(cmodel.StateValue, axis=1)
 value_clipped = d_value + tf.clip_by_value(value_prediction - d_value, -PPO_EPSILON, PPO_EPSILON)
 value_clipped_loss = (value_clipped - d_reward) ** 2
@@ -152,7 +151,7 @@ observation_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS, model.Model.
                                  dtype=numpy.float32)
 action_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS, model.Model.ACTION_COUNT),
                             dtype=numpy.float32)
-log_prob_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS, model.Model.ACTION_COUNT), dtype=numpy.float32)
+log_prob_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=numpy.float32)
 advantage_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=numpy.float32)
 reward_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=numpy.float32)
 value_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=numpy.float32)
@@ -163,7 +162,7 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
     state_buffer[rollout_idx: rollout_idx + 1, :, :, :] = numpy.transpose(rollout[0], (2, 0, 1, 3))
     observation_buffer[rollout_idx: rollout_idx + 1, :, :] = numpy.transpose(rollout[1], (1, 0, 2))
     action_buffer[rollout_idx: rollout_idx + 1, :, :] = numpy.transpose(rollout[2], (1, 0, 2))
-    log_prob_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[3], (1, 0, 2))
+    log_prob_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[3], (1, 0))
     advantage_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[4], (1, 0))
     reward_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[5], (1, 0))
     value_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[6], (1, 0))
