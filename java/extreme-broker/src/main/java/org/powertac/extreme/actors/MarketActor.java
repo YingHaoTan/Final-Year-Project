@@ -12,7 +12,7 @@ import org.powertac.samplebroker.interfaces.BrokerContext;
 public class MarketActor extends Actor<MarketState> {
 	
 	private enum MarketAction {
-		NONE, BUY, SELL
+		NoOp, Transact
 	}
 	
 	private MarketAction[] actions;
@@ -48,13 +48,9 @@ public class MarketActor extends Actor<MarketState> {
 			double p = price[i];
 			double q = quantity[i];
 			
-			if(actions[i] != MarketAction.NONE && Math.abs(q) >= competition.getMinimumOrderQuantity()) {
+			if(actions[i] != MarketAction.NoOp && Math.abs(q) >= competition.getMinimumOrderQuantity()) {
 				Order order;
-				
-				if (actions[i] == MarketAction.BUY)
-					order = new Order(context.getBroker(), enabledTimeslots.get(i).getSerialNumber(), q, -p);
-				else
-					order = new Order(context.getBroker(), enabledTimeslots.get(i).getSerialNumber(), -q, p);
+				order = new Order(context.getBroker(), enabledTimeslots.get(i).getSerialNumber(), q, p);
 				
 				context.sendMessage(order);
 			}

@@ -52,9 +52,9 @@ public class TariffActor extends Actor<TariffState> {
 		for(int i = 0; i < this.variable_rate.length; i++)
 			this.variable_rate[i] = buffer.getFloat();
 		for(int i = 0; i < this.variable_ratio.length; i++)
-			this.variable_ratio[i] = buffer.getFloat();
+			this.variable_ratio[i] = Math.min(Math.max(buffer.getFloat(), 0.0), 1.0);
 		this.fixed_rate = buffer.getFloat();
-		this.curtail_ratio = buffer.getFloat();
+		this.curtail_ratio = Math.min(Math.max(buffer.getFloat(), 0.0), 1.0);
 		this.up_regulation = buffer.getFloat();
 		this.down_regulation = buffer.getFloat();
 		this.pp = buffer.getFloat();
