@@ -257,7 +257,7 @@ class BetaPolicy(Policy):
         return (self.Concentration1 - 1) / (self.Concentration0 + self.Concentration1 - 2)
 
     def entropy(self):
-        return self.Distribution.entropy()
+        return tf.reduce_sum(self.Distribution.entropy(), axis=1)
 
     def log_prob(self, x):
         return tf.reduce_sum(self.Distribution.log_prob(x), axis=1)
