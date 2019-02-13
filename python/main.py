@@ -15,14 +15,14 @@ CHECKPOINT_PREFIX = os.path.join(CHECKPOINT_DIR, "model")
 PPO_EPSILON = 0.2
 PORT = 61000
 PT_PORT = 60000
-ROLLOUT_STEPS = 168
+ROLLOUT_STEPS = 24
 NBATCHES = 15
 BUFFER_SIZE = 630
 NUM_MINIBATCH = 21
-NUM_EPOCHS = 10
-MAX_EPOCHS = 1000 * NUM_EPOCHS
+NUM_EPOCHS = 16
+MAX_EPOCHS = 2500 * NUM_EPOCHS
 WARMUP_PHASE = 1 * NUM_EPOCHS
-MAX_PHASE = 200 * NUM_EPOCHS
+MAX_PHASE = 250 * NUM_EPOCHS
 INITIAL_LR = 0.0002
 FINAL_LR = 0.00002
 
@@ -34,7 +34,7 @@ CPU_SEMAPHORE = threading.BoundedSemaphore(1)
 numpy.warnings.filterwarnings('ignore')
 print("Setting up trainer to perform %d training epochs" % MAX_EPOCHS)
 
-state_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, 2, 1, model.Model.HIDDEN_STATE_COUNT))
+state_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, 1, model.Model.HIDDEN_STATE_COUNT))
 obs_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS, model.Model.FEATURE_COUNT + 1))
 action_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS, model.Model.ACTION_COUNT))
 log_prob_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS))
@@ -51,7 +51,7 @@ dataset = dataset.repeat(NUM_EPOCHS)
 d_iterator = dataset.make_initializable_iterator()
 
 d_state, d_obs, d_action, d_log_prob, d_reward, d_adv, d_value = d_iterator.get_next()
-d_state = tf.transpose(d_state, (1, 2, 0, 3))
+d_state = tf.transpose(d_state, (1, 0, 2))
 d_obs = tf.transpose(d_obs, (1, 0, 2))
 d_action = tf.reshape(tf.transpose(d_action, (1, 0, 2)), (-1, model.Model.ACTION_COUNT))
 d_log_prob = tf.reshape(tf.transpose(d_log_prob, (1, 0)), [-1])
@@ -66,8 +66,8 @@ dataset = dataset.repeat(NUM_EPOCHS * NUM_MINIBATCH)
 d_summaryiterator = dataset.make_initializable_iterator()
 d_cash, d_sadv = d_summaryiterator.get_next()
 
-alt_model = model.Model(d_obs[:, :, 1:], tf.unstack(d_state, 2), name='AlternateModel')
-cmodel = model.Model(d_obs[:, :, 1:], tf.unstack(d_state, 2))
+alt_model = model.Model(d_obs[:, :, 1:], d_state, name='AlternateModel')
+cmodel = model.Model(d_obs[:, :, 1:], d_state)
 
 transfer_op = model.Model.create_transfer_op(cmodel, alt_model)
 global_step = tf.train.create_global_step()
@@ -145,7 +145,7 @@ else:
 server_threads = [threading.Thread(target=server.serve, kwargs={"session": sess}) for server in servers]
 utility.apply(lambda thread: thread.start(), server_threads)
 
-state_buffer = numpy.zeros(shape=(BUFFER_SIZE, 2, 1, model.Model.HIDDEN_STATE_COUNT),
+state_buffer = numpy.zeros(shape=(BUFFER_SIZE, 1, model.Model.HIDDEN_STATE_COUNT),
                            dtype=numpy.float32)
 observation_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS, model.Model.FEATURE_COUNT + 1),
                                  dtype=numpy.float32)
@@ -159,7 +159,7 @@ rollout_idx = 0
 step_count = sess.run(global_step)
 
 for rollout in iter(ROLLOUT_QUEUE.get, None):
-    state_buffer[rollout_idx: rollout_idx + 1, :, :, :] = numpy.transpose(rollout[0], (2, 0, 1, 3))
+    state_buffer[rollout_idx: rollout_idx + 1, :, :] = numpy.transpose(rollout[0], (1, 0, 2))
     observation_buffer[rollout_idx: rollout_idx + 1, :, :] = numpy.transpose(rollout[1], (1, 0, 2))
     action_buffer[rollout_idx: rollout_idx + 1, :, :] = numpy.transpose(rollout[2], (1, 0, 2))
     log_prob_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[3], (1, 0))
