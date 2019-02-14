@@ -359,7 +359,7 @@ class Model:
             self.Inputs = inputs
             self.Embedding = embedding
             self.RunningStats = running_stats
-            self.StateOut = state_out
+            self.StateOut = state_out[0]
             self.Policies = GroupedPolicy([market_policies, tariff_policies], name="Policy")
             self.StateValue = __build_dense__(hidden_state, 1, name="StateValue")
             self.EvaluationOp = self.Policies.sample()
