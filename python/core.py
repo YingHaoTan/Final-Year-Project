@@ -87,7 +87,8 @@ class AgentServerHook(server.ServerHook):
 
     def __init__(self, model_builder_fn, num_clients: int, name="AgentServerHook"):
         internal_state = __build_internal_state__(name, model_builder_fn.state_shapes(num_clients))
-        model = model_builder_fn(num_clients, internal_state)
+        reset_state = tf.placeholder(tf.bool, shape=())
+        model = model_builder_fn(num_clients, internal_state, reset_state)
         observation_struct = struct.Struct(">%df" % (model.Inputs.shape.dims[-1] + 1))
         output_struct = struct.Struct(">%df" % model.EvaluationOp.shape.dims[-1])
 
@@ -95,12 +96,13 @@ class AgentServerHook(server.ServerHook):
             step_op = tf.identity(model.EvaluationOp)
 
         self.Name = name
-        self.InternalState = internal_state
         self.ClientCount = num_clients
         self.Model = model
         self.StepOp = step_op
+        self.ResetState = reset_state
         self.__observation_struct__ = observation_struct
         self.__output_struct__ = output_struct
+        self.__reset__ = True
 
     def get_observation_structure(self):
         return self.__observation_struct__
@@ -112,10 +114,14 @@ class AgentServerHook(server.ServerHook):
         pass
 
     def on_start(self, session, **kwargs):
-        session.run(self.InternalState.initializer)
+        self.__reset__ = True
 
     def on_step(self, observations, session, **kwargs):
-        return session.run(self.StepOp, feed_dict={self.Model.Inputs: numpy.array([observations])[:, :, 1:]})
+        result = session.run(self.StepOp, feed_dict={self.Model.Inputs: numpy.array([observations])[:, :, 1:],
+                                                     self.ResetState: self.__reset__})
+        self.__reset__ = False
+
+        return result
 
     def on_stop(self, session, **kwargs):
         pass
@@ -206,7 +212,8 @@ class PowerTACRolloutHook(PowerTACGameHook):
         super().__init__(model_builder_fn, num_clients, powertac_port, cpu_semaphore, bootstrap_manager, name)
 
         internal_state = __build_internal_state__(name + 'Alt', model_builder_fn.state_shapes(1))
-        model = model_builder_fn(self.Model.Inputs[:, -1:, :], internal_state, name=alternate_model_name)
+        model = model_builder_fn(self.Model.Inputs[:, -1:, :], internal_state, self.ResetState,
+                                 name=alternate_model_name)
 
         with tf.control_dependencies([tf.assign(internal_state, model.StateOut)]):
             alternate_policy_prob = alternate_policy_prob / (1.0 / num_clients)
@@ -221,6 +228,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
         self.RecvQueue = recv_queue
         self.Lambda = lambda_val
         self.__rollout_states__ = None
+        self.__reset_rollouts__ = numpy.zeros(shape=nsteps, dtype=numpy.bool)
         self.__observation_rollouts__ = numpy.zeros(shape=(nsteps, num_clients,
                                                            self.Model.Inputs.shape.dims[-1] + 1),
                                                     dtype=numpy.float32)
@@ -238,7 +246,6 @@ class PowerTACRolloutHook(PowerTACGameHook):
                        self.Model.Policies.log_prob(self.StepOp),
                        gamma_op]
         self.AlternateModel = model
-        self.AlternateInternalState = internal_state
 
     def __calculate_reward__(self, cash):
         p_array = numpy.zeros(shape=(1, self.ClientCount), dtype=numpy.float32)
@@ -261,7 +268,6 @@ class PowerTACRolloutHook(PowerTACGameHook):
     def on_start(self, session, **kwargs):
         super().on_start(session=session, **kwargs)
         self.__rollout_index__ = 0
-        session.run(self.AlternateInternalState.initializer)
 
     def on_step(self, observations, session, **kwargs):
         if self.ExpectedModelVersion < self.ModelVersion:
@@ -284,7 +290,9 @@ class PowerTACRolloutHook(PowerTACGameHook):
         rollout_pidx = self.NSteps - 1 if rollout_idx == 0 else rollout_idx - 1
 
         if rollout_idx == 0:
-            self.__rollout_states__ = session.run(self.InternalState)
+            self.__rollout_states__ = session.run(self.Model.StateIn)
+
+        self.__reset_rollouts__[rollout_idx] = self.__reset__
         actions, value, log_prob, gamma = super().on_step(observations, session, **kwargs)
 
         observations = numpy.array([observations])
@@ -305,7 +313,8 @@ class PowerTACRolloutHook(PowerTACGameHook):
             reward = advantage + self.__value_rollouts__
 
             for idx in range(self.ClientCount - 1):
-                self.RecvQueue.put((self.__rollout_states__[:, idx: idx + 1, :],
+                self.RecvQueue.put((self.__reset_rollouts__[idx],
+                                    self.__rollout_states__[:, idx: idx + 1, :],
                                     self.__observation_rollouts__[:, idx: idx + 1, :],
                                     self.__action_rollouts__[:, idx: idx + 1, :],
                                     self.__log_prob_rollouts__[:, idx: idx + 1],

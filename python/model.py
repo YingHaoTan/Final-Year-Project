@@ -323,7 +323,7 @@ class Model:
     TARIFF_SLOTS_PER_ACTOR = 4
     TARIFF_ACTORS = 5
 
-    def __init__(self, inputs, state_in, name="Model"):
+    def __init__(self, inputs, state_in, reset_state, name="Model"):
         if isinstance(inputs, int):
             inputs = tf.placeholder(shape=(1, inputs, Model.FEATURE_COUNT), dtype=tf.float32, name="InputPlaceholder")
         elif not isinstance(inputs, tf.Tensor) or \
@@ -348,6 +348,9 @@ class Model:
             embedding = tf.reshape(embedding, [inputs_shape.dims[0], -1, embedding.shape.dims[-1]])
             hidden_cell = rnn.CudnnGRU(1, Model.HIDDEN_STATE_COUNT, kernel_initializer=init.orthogonal(),
                                        name="%s/HState" % name)
+            initial_state_var = tf.get_variable(name="%s/IState" % name, shape=self.state_shapes(1),
+                                                initializer=init.zeros(), trainable=True)
+            state_in = tf.to_float(reset_state) * initial_state_var + (1 - tf.to_float(reset_state)) * state_in
 
             hidden_state, state_out = hidden_cell(embedding, tuple([state_in]))
             hidden_state = tf.reshape(hidden_state, [-1, Model.HIDDEN_STATE_COUNT])
@@ -360,6 +363,7 @@ class Model:
             self.Embedding = embedding
             self.RunningStats = running_stats
             self.StateOut = state_out[0]
+            self.StateIn = state_in
             self.Policies = GroupedPolicy([market_policies, tariff_policies], name="Policy")
             self.StateValue = __build_dense__(hidden_state, 1, name="StateValue")
             self.EvaluationOp = self.Policies.sample()
