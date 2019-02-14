@@ -347,7 +347,7 @@ class Model:
             embedding = Model.__build_input_embedding__(normalized_inputs)
             embedding = tf.reshape(embedding, [inputs_shape.dims[0], -1, embedding.shape.dims[-1]])
             hidden_cell = rnn.CudnnGRU(1, Model.HIDDEN_STATE_COUNT, kernel_initializer=init.orthogonal(),
-                                       name="%s_HState" % name)
+                                       name="%s/HState" % name)
 
             hidden_state, state_out = hidden_cell(embedding, tuple([state_in]))
             hidden_state = tf.reshape(hidden_state, [-1, Model.HIDDEN_STATE_COUNT])
@@ -359,7 +359,7 @@ class Model:
             self.Inputs = inputs
             self.Embedding = embedding
             self.RunningStats = running_stats
-            self.StateOut = state_out[0]
+            self.StateOut = state_out
             self.Policies = GroupedPolicy([market_policies, tariff_policies], name="Policy")
             self.StateValue = __build_dense__(hidden_state, 1, name="StateValue")
             self.EvaluationOp = self.Policies.sample()
