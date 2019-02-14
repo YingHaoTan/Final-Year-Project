@@ -290,7 +290,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
         rollout_pidx = self.NSteps - 1 if rollout_idx == 0 else rollout_idx - 1
 
         if rollout_idx == 0:
-            self.__rollout_states__ = session.run(self.Model.StateIn)
+            self.__rollout_states__ = session.run(self.Model.InitialState)
 
         self.__reset_rollouts__[rollout_idx] = self.__reset__
         actions, value, log_prob, gamma = super().on_step(observations, session, **kwargs)
