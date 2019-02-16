@@ -180,7 +180,8 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
         with CPU_SEMAPHORE:
             if stats_count > 0:
                 sess.run([d_iterator.initializer, d_summaryiterator.initializer],
-                         feed_dict={state_placeholder: state_buffer,
+                         feed_dict={reset_placeholder: reset_buffer,
+                                    state_placeholder: state_buffer,
                                     obs_placeholder: observation_buffer,
                                     action_placeholder: action_buffer,
                                     log_prob_placeholder: log_prob_buffer,

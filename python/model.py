@@ -83,29 +83,42 @@ def __build_dense__(inputs, num_units, activation=None, initializer=init.orthogo
 def __build_embedding__(inputs, num_units, activation=None, initializer=init.orthogonal(),
                         bias_initializer=init.zeros(), use_layer_norm=False, name="Embedding"):
     with tf.variable_scope(name):
-        encoder = __build_dense__(inputs, inputs.shape[-1], activation=activation,
+        encoder = __build_dense__(inputs, num_units, activation=activation,
                                   initializer=initializer, bias_initializer=bias_initializer,
                                   use_layer_norm=use_layer_norm, name="Encoder")
+        return inputs + __build_dense__(encoder, num_units, activation=activation, initializer=initializer,
+                                        bias_initializer=bias_initializer, use_layer_norm=use_layer_norm,
+                                        name="Output")
 
-        return __build_dense__(encoder, num_units, activation=activation, initializer=initializer,
-                               bias_initializer=bias_initializer, use_layer_norm=use_layer_norm, name="Vector")
 
-
-def __build_conv_embedding__(inputs, num_units, ksizes=(2, 3, 3, 5), ssizes=(1, 2, 2, 1),
+def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), initial_dim=(8, 24),
                              activation=None, initializer=init.orthogonal(),
                              bias_initializer=init.zeros(), name="ConvEmbedding"):
-    assert len(ksizes) == len(ssizes)
+    num_layers = len(ssizes)
 
-    num_layers = len(ksizes)
-    conv_embedding = inputs
     with tf.variable_scope(name):
-        for idx in range(len(ksizes)):
+        conv_embedding = tf.layers.conv1d(inputs, initial_dim[0], int(inputs.shape.dims[-1] - initial_dim[1] + 1), 1,
+                                          data_format='channels_first', activation=None,
+                                          kernel_initializer=initializer,
+                                          bias_initializer=bias_initializer,
+                                          name="SpatialProjection")
+
+        for idx in range(len(ssizes)):
             num_filters = int(num_units / (2 ** (num_layers - idx - 1)))
-            conv_embedding = tf.layers.conv1d(conv_embedding, num_filters, ksizes[idx], ssizes[idx],
+
+            projection = tf.layers.conv1d(conv_embedding, num_filters, 3, ssizes[idx],
+                                          data_format='channels_first', activation=None,
+                                          kernel_initializer=initializer,
+                                          bias_initializer=bias_initializer,
+                                          padding="SAME",
+                                          name="Projection/%d" % (idx + 1))
+            conv_embedding = tf.layers.conv1d(conv_embedding, num_filters, 3, ssizes[idx],
                                               data_format='channels_first', activation=activation,
                                               kernel_initializer=initializer,
                                               bias_initializer=bias_initializer,
-                                              name=str(idx + 1))
+                                              padding="SAME",
+                                              name="Convolution/%d" % (idx + 1))
+            conv_embedding = conv_embedding + projection
 
         return tf.reshape(conv_embedding, (-1, conv_embedding.shape[-2]))
 
@@ -350,6 +363,7 @@ class Model:
                                        name="%s/HState" % name)
             initial_state_var = tf.get_variable(name="%s/IState" % name, shape=self.state_shapes(1),
                                                 initializer=init.zeros(), trainable=True)
+            reset_state = tf.reshape(reset_state, (1, -1, 1))
             state_in = tf.to_float(reset_state) * initial_state_var + (1 - tf.to_float(reset_state)) * state_in
 
             hidden_state, state_out = hidden_cell(embedding, tuple([state_in]))
@@ -383,7 +397,6 @@ class Model:
                                                      activation=tf.nn.relu,
                                                      initializer=init.orthogonal(np.sqrt(2)),
                                                      bias_initializer=init.zeros(),
-                                                     ksizes=(3, 3, 3, 5), ssizes=(1, 2, 2, 1),
                                                      name="WeatherEmbedding")
 
         market_embedding = tf.reshape(normalized_inputs[3], (-1, 7, 24))
