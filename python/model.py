@@ -83,7 +83,7 @@ def __build_dense__(inputs, num_units, activation=None, initializer=init.orthogo
 def __build_embedding__(inputs, num_units, activation=None, initializer=init.orthogonal(),
                         bias_initializer=init.zeros(), use_layer_norm=False, name="Embedding"):
     with tf.variable_scope(name):
-        input_projection = __build_dense__(inputs, inputs.shape.dims[-1], activation=None,
+        input_projection = __build_dense__(inputs, num_units, activation=None,
                                            initializer=init.orthogonal(), bias_initializer=bias_initializer,
                                            use_layer_norm=use_layer_norm, name="Projection")
         encoder = __build_dense__(inputs, inputs.shape.dims[-1], activation=activation,
