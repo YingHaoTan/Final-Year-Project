@@ -83,12 +83,16 @@ def __build_dense__(inputs, num_units, activation=None, initializer=init.orthogo
 def __build_embedding__(inputs, num_units, activation=None, initializer=init.orthogonal(),
                         bias_initializer=init.zeros(), use_layer_norm=False, name="Embedding"):
     with tf.variable_scope(name):
-        encoder = __build_dense__(inputs, num_units, activation=activation,
+        input_projection = __build_dense__(inputs, inputs.shape.dims[-1], activation=None,
+                                           initializer=init.orthogonal(), bias_initializer=bias_initializer,
+                                           use_layer_norm=use_layer_norm, name="Projection")
+        encoder = __build_dense__(inputs, inputs.shape.dims[-1], activation=activation,
                                   initializer=initializer, bias_initializer=bias_initializer,
                                   use_layer_norm=use_layer_norm, name="Encoder")
-        return inputs + __build_dense__(encoder, num_units, activation=activation, initializer=initializer,
-                                        bias_initializer=bias_initializer, use_layer_norm=use_layer_norm,
-                                        name="Output")
+
+        return input_projection + __build_dense__(encoder, num_units, activation=activation, initializer=initializer,
+                                                  bias_initializer=bias_initializer, use_layer_norm=use_layer_norm,
+                                                  name="Output")
 
 
 def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), initial_dim=(8, 24),
@@ -99,7 +103,7 @@ def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), initial_dim
     with tf.variable_scope(name):
         conv_embedding = tf.layers.conv1d(inputs, initial_dim[0], int(inputs.shape.dims[-1] - initial_dim[1] + 1), 1,
                                           data_format='channels_first', activation=None,
-                                          kernel_initializer=initializer,
+                                          kernel_initializer=init.orthogonal(),
                                           bias_initializer=bias_initializer,
                                           name="SpatialProjection")
 
@@ -108,7 +112,7 @@ def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), initial_dim
 
             projection = tf.layers.conv1d(conv_embedding, num_filters, 3, ssizes[idx],
                                           data_format='channels_first', activation=None,
-                                          kernel_initializer=initializer,
+                                          kernel_initializer=init.orthogonal(),
                                           bias_initializer=bias_initializer,
                                           padding="SAME",
                                           name="Projection/%d" % (idx + 1))
