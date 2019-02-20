@@ -9,6 +9,7 @@ import tensorflow as tf
 import os
 import random
 
+CLIENT_PARALLELISM = 10
 SUMMARY_DIR = "summary"
 CHECKPOINT_DIR = "ckpt"
 CHECKPOINT_PREFIX = os.path.join(CHECKPOINT_DIR, "model")
@@ -17,8 +18,8 @@ PORT = 61000
 PT_PORT = 60000
 ROLLOUT_STEPS = 168
 NBATCHES = 15
-BUFFER_SIZE = 6750
-NUM_MINIBATCH = 45
+BUFFER_SIZE = 2250
+NUM_MINIBATCH = 25
 NUM_EPOCHS = 10
 MAX_EPOCHS = 2500 * NUM_EPOCHS
 WARMUP_PHASE = 1 * NUM_EPOCHS
@@ -26,10 +27,10 @@ MAX_PHASE = 250 * NUM_EPOCHS
 INITIAL_LR = 0.0002
 FINAL_LR = 0.00002
 
-NUM_CLIENTS = [4] * 150
+NUM_CLIENTS = [4] * 50
 LAMBDA = 0.95
 ROLLOUT_QUEUE = queue.Queue()
-CPU_SEMAPHORE = threading.BoundedSemaphore(1)
+CPU_SEMAPHORE = threading.BoundedSemaphore(CLIENT_PARALLELISM)
 
 numpy.warnings.filterwarnings('ignore')
 print("Setting up trainer to perform %d training epochs" % MAX_EPOCHS)
@@ -127,7 +128,7 @@ summary_op = tf.summary.merge_all()
 saver = tf.train.Saver()
 summary_writer = tf.summary.FileWriter(SUMMARY_DIR, graph=tf.get_default_graph())
 
-bootstrap_manager = core.BootstrapManager()
+bootstrap_manager = core.BootstrapManager(CLIENT_PARALLELISM)
 servers = [server.Server(NUM_CLIENTS[idx], PORT + idx,
                          core.PowerTACRolloutHook(model.Model, NUM_CLIENTS[idx], PT_PORT + idx,
                                                   CPU_SEMAPHORE, bootstrap_manager, ROLLOUT_STEPS, NBATCHES,
