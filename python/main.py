@@ -9,7 +9,7 @@ import tensorflow as tf
 import os
 import random
 
-CLIENT_PARALLELISM = 10
+CLIENT_PARALLELISM = 1
 SUMMARY_DIR = "summary"
 CHECKPOINT_DIR = "ckpt"
 CHECKPOINT_PREFIX = os.path.join(CHECKPOINT_DIR, "model")
