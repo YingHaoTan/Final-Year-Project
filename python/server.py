@@ -52,13 +52,13 @@ class Server:
         buffers = tuple(bytearray(self.Hook.get_observation_structure().size) for _ in range(self.ClientCount))
 
         self.ServerSocket.bind(('127.0.0.1', self.Port))
+        self.ServerSocket.settimeout(120)
         self.ServerSocket.listen(self.ClientCount)
         self.Active = True
         while self.Active:
             self.Hook.setup(self, **kwargs)
             clients = [self.ServerSocket.accept()[0] for _ in range(self.ClientCount)]
             utility.apply(lambda client: client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, True), clients)
-            utility.apply(lambda client: client.settimeout(90), clients)
             utility.apply(lambda client: client.recv(1), clients)
             utility.apply(lambda client: client.setblocking(0), clients)
 
