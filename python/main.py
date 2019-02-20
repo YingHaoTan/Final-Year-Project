@@ -35,7 +35,7 @@ numpy.warnings.filterwarnings('ignore')
 print("Setting up trainer to perform %d training epochs" % MAX_EPOCHS)
 
 reset_placeholder = tf.placeholder(tf.bool, BUFFER_SIZE)
-state_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, 1, model.Model.HIDDEN_STATE_COUNT))
+state_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, model.Model.HIDDEN_STATE_COUNT))
 obs_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS, model.Model.FEATURE_COUNT + 1))
 action_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS, model.Model.ACTION_COUNT))
 log_prob_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS))
@@ -52,8 +52,7 @@ dataset = dataset.repeat(NUM_EPOCHS)
 d_iterator = dataset.make_initializable_iterator()
 
 d_reset, d_state, d_obs, d_action, d_log_prob, d_reward, d_adv, d_value = d_iterator.get_next()
-d_state = tf.reshape(tf.transpose(d_state, (1, 0, 2)),
-                     (1, BUFFER_SIZE // NUM_MINIBATCH, model.Model.HIDDEN_STATE_COUNT))
+d_state = tf.reshape(d_state, (BUFFER_SIZE // NUM_MINIBATCH, model.Model.HIDDEN_STATE_COUNT))
 d_obs = tf.transpose(d_obs, (1, 0, 2))
 d_action = tf.reshape(tf.transpose(d_action, (1, 0, 2)), (-1, model.Model.ACTION_COUNT))
 d_log_prob = tf.reshape(tf.transpose(d_log_prob, (1, 0)), [-1])
@@ -148,7 +147,7 @@ server_threads = [threading.Thread(target=server.serve, kwargs={"session": sess}
 utility.apply(lambda thread: thread.start(), server_threads)
 
 reset_buffer = numpy.zeros(shape=BUFFER_SIZE, dtype=numpy.bool)
-state_buffer = numpy.zeros(shape=(BUFFER_SIZE, 1, model.Model.HIDDEN_STATE_COUNT),
+state_buffer = numpy.zeros(shape=(BUFFER_SIZE, model.Model.HIDDEN_STATE_COUNT),
                            dtype=numpy.float32)
 observation_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS, model.Model.FEATURE_COUNT + 1),
                                  dtype=numpy.float32)
@@ -163,7 +162,7 @@ step_count = sess.run(global_step)
 
 for rollout in iter(ROLLOUT_QUEUE.get, None):
     reset_buffer[rollout_idx] = rollout[0]
-    state_buffer[rollout_idx: rollout_idx + 1, :, :] = numpy.transpose(rollout[1], (1, 0, 2))
+    state_buffer[rollout_idx: rollout_idx + 1, :] = rollout[1]
     observation_buffer[rollout_idx: rollout_idx + 1, :, :] = numpy.transpose(rollout[2], (1, 0, 2))
     action_buffer[rollout_idx: rollout_idx + 1, :, :] = numpy.transpose(rollout[3], (1, 0, 2))
     log_prob_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[4], (1, 0))
