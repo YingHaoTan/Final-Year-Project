@@ -314,7 +314,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
             for idx in range(self.ClientCount - 1):
                 self.RecvQueue.put((self.__reset_rollouts__[idx],
-                                    self.__rollout_states__[:, idx: idx + 1, :],
+                                    self.__rollout_states__[idx: idx + 1, :],
                                     self.__observation_rollouts__[:, idx: idx + 1, :],
                                     self.__action_rollouts__[:, idx: idx + 1, :],
                                     self.__log_prob_rollouts__[:, idx: idx + 1],
