@@ -57,8 +57,8 @@ class Server:
         self.ServerSocket.listen(self.ClientCount)
         self.Active = True
         while self.Active:
+            self.Hook.setup(self, **kwargs)
             try:
-                self.Hook.setup(self, **kwargs)
                 clients = [self.ServerSocket.accept()[0] for _ in range(self.ClientCount)]
                 utility.apply(lambda client: client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, True), clients)
                 utility.apply(lambda client: client.recv(1), clients)
