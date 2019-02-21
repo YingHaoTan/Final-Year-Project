@@ -2,6 +2,7 @@ import socket
 import struct
 import select
 import utility
+from socket import Timeouterror
 
 
 class ServerResetException(Exception):
@@ -51,19 +52,20 @@ class Server:
     def serve(self, **kwargs):
         buffers = tuple(bytearray(self.Hook.get_observation_structure().size) for _ in range(self.ClientCount))
 
-        self.ServerSocket.settimeout(90)
-        self.ServerSocket.bind(('127.0.0.1', self.Port))
-        self.ServerSocket.listen(self.ClientCount)
-        self.Active = True
-        while self.Active:
-            self.Hook.setup(self, **kwargs)
-            clients = [self.ServerSocket.accept()[0] for _ in range(self.ClientCount)]
-            utility.apply(lambda client: client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, True), clients)
-            utility.apply(lambda client: client.recv(1), clients)
-            utility.apply(lambda client: client.setblocking(0), clients)
+        try:
+            self.ServerSocket.settimeout(90)
+            self.ServerSocket.bind(('127.0.0.1', self.Port))
+            self.ServerSocket.listen(self.ClientCount)
+            self.Active = True
+            while self.Active:
+                self.Hook.setup(self, **kwargs)
+                clients = [self.ServerSocket.accept()[0] for _ in range(self.ClientCount)]
+                utility.apply(lambda client: client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, True), clients)
+                utility.apply(lambda client: client.recv(1), clients)
+                utility.apply(lambda client: client.setblocking(0), clients)
 
-            self.Hook.on_start(**kwargs)
-            try:
+                self.Hook.on_start(**kwargs)
+            
                 while self.Active:
                     if self.Reset:
                         raise ServerResetException('Server raised a reset flag')
@@ -95,10 +97,10 @@ class Server:
                             if len(outputs[index]) == 0:
                                 uncleared_sockets.remove(wsocket)
                                 outputs[index] = None
-            except (ConnectionResetError, ServerResetException) as e:
-                if isinstance(e, ServerResetException):
-                    self.Reset = False
-                    self.Hook.on_reset()
-                utility.apply(lambda client: client.close(), clients)
-                self.Hook.on_stop(**kwargs)
+        except (ConnectionResetError, ServerResetException, Timeouterror) as e:
+            if isinstance(e, ServerResetException):
+                self.Reset = False
+                self.Hook.on_reset()
+            utility.apply(lambda client: client.close(), clients)
+            self.Hook.on_stop(**kwargs)
 
