@@ -371,9 +371,8 @@ class Model:
                                                 initializer=init.zeros(), trainable=True)
             reset_state = tf.reshape(reset_state, (-1, 1))
             state_in = tf.to_float(reset_state) * initial_state_var + (1 - tf.to_float(reset_state)) * state_in
-            state_in = tf.expand_dims(state_in, axis=0)
 
-            hidden_state, state_out = hidden_cell(embedding, tuple([state_in]))
+            hidden_state, state_out = hidden_cell(embedding, tuple([tf.expand_dims(state_in, axis=0)]))
             hidden_state = tf.reshape(hidden_state, [-1, Model.HIDDEN_STATE_COUNT])
 
             market_policies = Model.__build_market_policies__(hidden_state)
