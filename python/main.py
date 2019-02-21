@@ -178,8 +178,10 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
 
     rollout_idx = (rollout_idx + 1) % BUFFER_SIZE
     progress.update()
-    print("Optimizer received rollouts: %d" % (BUFFER_SIZE if rollout_idx == 0 else rollout_idx))
     if rollout_idx == 0:
+        progress.close()
+        progress = tqdm(total=BUFFER_SIZE)
+
         sess.run(transfer_op)
         stats_count = sess.run(cmodel.RunningStats.Count)
         print("Running Statistics Count: %d" % stats_count)
@@ -226,6 +228,5 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
             utility.apply(lambda server: server.stop(), servers)
             break
 
-progress.close()
 utility.apply(lambda thread: thread.join(), server_threads)
 bootstrap_manager.kill()
