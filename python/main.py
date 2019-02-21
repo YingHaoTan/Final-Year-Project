@@ -7,7 +7,8 @@ import queue
 import numpy
 import tensorflow as tf
 import os
-import random
+import logging
+import tqdm
 
 CLIENT_PARALLELISM = 1
 SUMMARY_DIR = "summary"
@@ -34,6 +35,9 @@ CPU_SEMAPHORE = threading.BoundedSemaphore(CLIENT_PARALLELISM)
 
 numpy.warnings.filterwarnings('ignore')
 print("Setting up trainer to perform %d training epochs" % MAX_EPOCHS)
+
+logging.basicConfig(filename="main.log", level=logging.INFO,
+                    format="%(asctime)s - %(threadName)s - %(levelname)s - %(message)s")
 
 reset_placeholder = tf.placeholder(tf.bool, BUFFER_SIZE)
 state_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, model.Model.HIDDEN_STATE_COUNT))
@@ -161,6 +165,7 @@ value_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=numpy.float
 rollout_idx = 0
 step_count = sess.run(global_step)
 
+progress = tqdm(total=BUFFER_SIZE)
 for rollout in iter(ROLLOUT_QUEUE.get, None):
     reset_buffer[rollout_idx] = rollout[0]
     state_buffer[rollout_idx: rollout_idx + 1, :] = rollout[1]
@@ -172,6 +177,7 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
     value_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[7], (1, 0))
 
     rollout_idx = (rollout_idx + 1) % BUFFER_SIZE
+    progress.update()
     print("Optimizer received rollouts: %d" % (BUFFER_SIZE if rollout_idx == 0 else rollout_idx))
     if rollout_idx == 0:
         sess.run(transfer_op)
@@ -220,5 +226,6 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
             utility.apply(lambda server: server.stop(), servers)
             break
 
+progress.close()
 utility.apply(lambda thread: thread.join(), server_threads)
 bootstrap_manager.kill()

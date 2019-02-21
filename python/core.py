@@ -8,6 +8,7 @@ import utility
 import threading
 import queue
 import os
+import logging
 from functools import reduce
 
 
@@ -150,7 +151,7 @@ class PowerTACGameHook(AgentServerHook):
         bootstrap_file = self.BootstrapManager.obtain_bootstrap(self.Name)
 
         self.CPUSemaphore.acquire()
-        print("Starting %s setup" % self.Name)
+        logging.info("Starting %s setup" % self.Name)
         self.ServerProcess = subprocess.Popen([*PowerTACGameHook.INTERPRETER_COMMAND,
                                                "server.jar",
                                                "--sim",
@@ -198,7 +199,7 @@ class PowerTACGameHook(AgentServerHook):
         if self.SemaphoreAcquired:
             self.CPUSemaphore.release()
             self.SemaphoreAcquired = False
-            print("%s: Semaphore released" % self.Name)
+            logging.info("%s: Semaphore released" % self.Name)
 
 
 class PowerTACRolloutHook(PowerTACGameHook):
@@ -300,7 +301,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
         self.__reward_rollouts__[rollout_pidx: rollout_pidx + 1, :] = self.__calculate_reward__(observations[:, :, 0])
         if self.__rollout_index__ > 0 and rollout_idx == 0:
-            print("%s submitting rollout for model update %d" % (self.Name, self.ExpectedModelVersion))
+            logging.info("%s submitting rollout for model update %d" % (self.Name, self.ExpectedModelVersion))
             nvalues = numpy.concatenate([self.__value_rollouts__[1:, :], value], axis=0)
 
             advantage = self.__reward_rollouts__ + gamma * nvalues - self.__value_rollouts__
