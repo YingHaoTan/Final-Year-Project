@@ -165,7 +165,7 @@ value_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=numpy.float
 rollout_idx = 0
 step_count = sess.run(global_step)
 
-progress = tqdm(total=BUFFER_SIZE)
+progress = tqdm.tqdm(total=BUFFER_SIZE)
 for rollout in iter(ROLLOUT_QUEUE.get, None):
     reset_buffer[rollout_idx] = rollout[0]
     state_buffer[rollout_idx: rollout_idx + 1, :] = rollout[1]
@@ -180,7 +180,7 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
     progress.update()
     if rollout_idx == 0:
         progress.close()
-        progress = tqdm(total=BUFFER_SIZE)
+        progress = tqdm.tqdm(total=BUFFER_SIZE)
 
         sess.run(transfer_op)
         stats_count = sess.run(cmodel.RunningStats.Count)
