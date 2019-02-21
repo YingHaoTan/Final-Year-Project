@@ -172,6 +172,7 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
     value_buffer[rollout_idx: rollout_idx + 1, :] = numpy.transpose(rollout[7], (1, 0))
 
     rollout_idx = (rollout_idx + 1) % BUFFER_SIZE
+    print("Optimizer received rollouts: %d" % (BUFFER_SIZE if rollout_idx == 0 else rollout_idx))
     if rollout_idx == 0:
         sess.run(transfer_op)
         stats_count = sess.run(cmodel.RunningStats.Count)
