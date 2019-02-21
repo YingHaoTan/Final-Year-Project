@@ -60,7 +60,7 @@ import tensorflow as tf
 import tensorflow.layers as layers
 import tensorflow.initializers as init
 import tensorflow.contrib.layers as clayers
-import tensorflow.nn.rnn_cell as rnn
+import tensorflow.contrib.cudnn_rnn as rnn
 from tensorflow_probability import distributions
 from functools import reduce
 import numpy as np
@@ -365,15 +365,15 @@ class Model:
 
             embedding = Model.__build_input_embedding__(normalized_inputs)
             embedding = tf.reshape(embedding, [inputs_shape.dims[0], -1, embedding.shape.dims[-1]])
-            hidden_cell = rnn.GRUCell(Model.HIDDEN_STATE_COUNT, kernel_initializer=init.orthogonal(),
-                                      bias_initializer=init.zeros(), name="%s/HState" % name)
+            hidden_cell = rnn.CudnnGRU(1, Model.HIDDEN_STATE_COUNT, kernel_initializer=init.orthogonal(),
+                                       bias_initializer=init.zeros(), name="%s/HState" % name)
             initial_state_var = tf.get_variable(name="%s/IState" % name, shape=self.state_shapes(1),
                                                 initializer=init.zeros(), trainable=True)
             reset_state = tf.reshape(reset_state, (-1, 1))
             state_in = tf.to_float(reset_state) * initial_state_var + (1 - tf.to_float(reset_state)) * state_in
+            state_in = tf.expand_dims(state_in, axis=0)
 
-            hidden_state, state_out = tf.nn.dynamic_rnn(cell=hidden_cell, inputs=embedding, initial_state=state_in,
-                                                        time_major=True)
+            hidden_state, state_out = hidden_cell(embedding, tuple([state_in]))
             hidden_state = tf.reshape(hidden_state, [-1, Model.HIDDEN_STATE_COUNT])
 
             market_policies = Model.__build_market_policies__(hidden_state)
@@ -383,7 +383,7 @@ class Model:
             self.Inputs = inputs
             self.Embedding = embedding
             self.RunningStats = running_stats
-            self.StateOut = state_out
+            self.StateOut = tf.squeeze(state_out[0], axis=0)
             self.InitialState = tf.ones_like(state_in, dtype=tf.float32) * initial_state_var
             self.Policies = GroupedPolicy([market_policies, tariff_policies], name="Policy")
             self.StateValue = __build_dense__(hidden_state, 1, name="StateValue")
