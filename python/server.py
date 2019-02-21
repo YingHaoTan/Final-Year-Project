@@ -98,10 +98,10 @@ class Server:
                                 uncleared_sockets.remove(wsocket)
                                 outputs[index] = None
             except (ConnectionResetError, ServerResetException, timeout) as e:
-                if isinstance(e, ServerResetException):
-                    self.Reset = False
-                    self.Hook.on_reset()
-                if isinstance(e, timeout):
+                if not isinstance(e, timeout):
                     utility.apply(lambda client: client.close(), clients)
+                    if isinstance(e, ServerResetException):
+                        self.Reset = False
+                        self.Hook.on_reset()
                 self.Hook.on_stop(**kwargs)
 
