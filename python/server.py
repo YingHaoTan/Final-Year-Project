@@ -101,6 +101,7 @@ class Server:
                 if isinstance(e, ServerResetException):
                     self.Reset = False
                     self.Hook.on_reset()
-                utility.apply(lambda client: client.close(), clients)
+                if isinstance(e, timeout):
+                    utility.apply(lambda client: client.close(), clients)
                 self.Hook.on_stop(**kwargs)
 
