@@ -52,7 +52,6 @@ class Server:
         buffers = tuple(bytearray(self.Hook.get_observation_structure().size) for _ in range(self.ClientCount))
 
         self.ServerSocket.bind(('127.0.0.1', self.Port))
-        self.ServerSocket.settimeout(120)
         self.ServerSocket.listen(self.ClientCount)
         self.Active = True
         while self.Active:
