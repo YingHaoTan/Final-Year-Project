@@ -9,10 +9,6 @@ class ServerResetException(Exception):
     pass
 
 
-class ClientInitializationException(Exception):
-    pass
-
-
 class ServerHook:
 
     def get_observation_structure(self) -> struct.Struct:
@@ -63,10 +59,7 @@ class Server:
         while self.Active:
             self.Hook.setup(self, **kwargs)
             try:
-                try:
-                    clients = [self.ServerSocket.accept()[0] for _ in range(self.ClientCount)]
-                except:
-                    raise ClientInitializationException('Client initialization failed')
+                clients = [self.ServerSocket.accept()[0] for _ in range(self.ClientCount)]
                     
                 utility.apply(lambda client: client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, True), clients)
                 utility.apply(lambda client: client.recv(1), clients)
@@ -105,11 +98,10 @@ class Server:
                             if len(outputs[index]) == 0:
                                 uncleared_sockets.remove(wsocket)
                                 outputs[index] = None
-            except (ConnectionResetError, ServerResetException, ClientInitializationException) as e:
-                if not isinstance(e, ClientInitializationException):
-                    utility.apply(lambda client: client.close(), clients)
-                    if isinstance(e, ServerResetException):
-                        self.Reset = False
-                        self.Hook.on_reset()
+            except (ConnectionResetError, ServerResetException) as e:
+                utility.apply(lambda client: client.close(), clients)
+                if isinstance(e, ServerResetException):
+                    self.Reset = False
+                    self.Hook.on_reset()
                 self.Hook.on_stop(**kwargs)
 
