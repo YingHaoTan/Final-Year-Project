@@ -2,7 +2,7 @@ import socket
 import struct
 import select
 import utility
-from socket import Timeouterror
+from socket import timeout
 
 
 class ServerResetException(Exception):
@@ -97,7 +97,7 @@ class Server:
                             if len(outputs[index]) == 0:
                                 uncleared_sockets.remove(wsocket)
                                 outputs[index] = None
-        except (ConnectionResetError, ServerResetException, Timeouterror) as e:
+        except (ConnectionResetError, ServerResetException, timeout) as e:
             if isinstance(e, ServerResetException):
                 self.Reset = False
                 self.Hook.on_reset()
