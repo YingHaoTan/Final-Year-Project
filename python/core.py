@@ -43,9 +43,9 @@ class BootstrapManager:
                                           "--boot",
                                           identifier],
                                          cwd=Directory.SCRATCH_BOOTSTRAP_DIR,
-                                         stdin=subprocess.PIPE,
-                                         stdout=subprocess.PIPE,
-                                         stderr=subprocess.PIPE)
+                                         stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.DEVNULL,
+                                         stderr=subprocess.DEVNULL)
 
             if returncode == 0:
                 self.SemaphoreMap[identifier].release()
@@ -161,9 +161,9 @@ class PowerTACGameHook(AgentServerHook):
                                                "--brokers",
                                                broker_identities],
                                               cwd=Directory.EXECUTABLE_DIR,
-                                              stdin=subprocess.PIPE,
-                                              stdout=subprocess.PIPE,
-                                              stderr=subprocess.PIPE)
+                                              stdin=subprocess.DEVNULL,
+                                              stdout=subprocess.DEVNULL,
+                                              stderr=subprocess.DEVNULL)
 
         for index in range(self.ClientCount):
             self.ClientProcesses[index] = subprocess.Popen([*PowerTACGameHook.INTERPRETER_COMMAND,
@@ -175,9 +175,9 @@ class PowerTACGameHook(AgentServerHook):
                                                             "--config",
                                                             "config/broker%d.properties" % index],
                                                            cwd=Directory.EXECUTABLE_DIR,
-                                                           stdin=subprocess.PIPE,
-                                                           stdout=subprocess.PIPE,
-                                                           stderr=subprocess.PIPE)
+                                                           stdin=subprocess.DEVNULL,
+                                                           stdout=subprocess.DEVNULL,
+                                                           stderr=subprocess.DEVNULL)
 
         self.BootstrapManager.start_bootstrap(self.Name)
         self.SemaphoreAcquired = True
