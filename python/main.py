@@ -165,6 +165,7 @@ value_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=numpy.float
 rollout_idx = 0
 step_count = sess.run(global_step)
 
+print("Starting training session")
 progress = tqdm.tqdm(total=BUFFER_SIZE)
 for rollout in iter(ROLLOUT_QUEUE.get, None):
     reset_buffer[rollout_idx] = rollout[0]
