@@ -212,15 +212,15 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
                                 cmodel.RunningStats.CountInput: stats_obs_buffer.shape[0]})
 
             if stats_count == 0:
-                progress.write("Initializing input statistics with %d data points" % stats_count)
+                progress.set_postfix_str("Initializing input statistics with %d data points" % stats_count)
                 utility.apply(lambda server: server.reset(), servers)
                 with ROLLOUT_QUEUE.mutex:
                     ROLLOUT_QUEUE.queue.clear()
             else:
-                progress.write("Update %d completed, %d input statistics collected" % (update_idx, stats_count))
+                progress.set_postfix_str("Update %d completed, %d input statistics collected" % (update_idx, stats_count))
                 utility.apply(lambda hook: hook.update(), map(lambda server: server.Hook, servers))
         if step_count > MAX_EPOCHS * NUM_MINIBATCH:
-            progress.write("Completed training process, terminating session")
+            progress.set_postfix_str("Completed training process, terminating session")
             utility.apply(lambda server: server.stop(), servers)
             break
             
