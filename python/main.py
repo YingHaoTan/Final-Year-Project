@@ -9,6 +9,7 @@ import tensorflow as tf
 import os
 import logging
 import tqdm
+import colorama
 
 CLIENT_PARALLELISM = 1
 SUMMARY_DIR = "summary"
