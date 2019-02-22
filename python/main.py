@@ -166,7 +166,10 @@ rollout_idx = 0
 step_count = sess.run(global_step)
 
 print("Starting training session\n")
-progress = tqdm.tqdm(total=BUFFER_SIZE)
+progress = tqdm.tqdm(total=BUFFER_SIZE, 
+                     bar_format="%s{l_bar}%s{bar}%s{r_bar}" % (colorama.Fore.WHITE, 
+                                                               colorama.Style.BRIGHT + colorama.Fore.GREEN, 
+                                                               colorama.Fore.WHITE))
 for rollout in iter(ROLLOUT_QUEUE.get, None):
     reset_buffer[rollout_idx] = rollout[0]
     state_buffer[rollout_idx: rollout_idx + 1, :] = rollout[1]
@@ -226,7 +229,10 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
             break
             
         progress.close()
-        progress = tqdm.tqdm(total=BUFFER_SIZE)
+        progress = tqdm.tqdm(total=BUFFER_SIZE,
+                            bar_format="%s{l_bar}%s{bar}%s{r_bar}" % (colorama.Fore.WHITE, 
+                                                               colorama.Style.BRIGHT + colorama.Fore.GREEN, 
+                                                               colorama.Fore.WHITE))
 
 utility.apply(lambda thread: thread.join(), server_threads)
 bootstrap_manager.kill()
