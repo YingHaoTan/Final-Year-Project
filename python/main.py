@@ -29,6 +29,8 @@ MAX_PHASE = 250 * NUM_EPOCHS
 INITIAL_LR = 0.0002
 FINAL_LR = 0.00002
 
+colorama.init()
+
 NUM_CLIENTS = [4] * 14
 LAMBDA = 0.95
 ROLLOUT_QUEUE = queue.Queue()
@@ -231,7 +233,7 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
             
         progress.close()
         progress = tqdm.tqdm(total=BUFFER_SIZE,
-                            bar_format="%s{l_bar}%s{bar}%s{r_bar}" % (colorama.Fore.WHITE, 
+                             bar_format="%s{l_bar}%s{bar}%s{r_bar}" % (colorama.Fore.WHITE,
                                                                colorama.Style.BRIGHT + colorama.Fore.GREEN, 
                                                                colorama.Fore.WHITE))
 
