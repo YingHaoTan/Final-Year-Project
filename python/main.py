@@ -179,12 +179,8 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
     rollout_idx = (rollout_idx + 1) % BUFFER_SIZE
     progress.update()
     if rollout_idx == 0:
-        progress.close()
-        progress = tqdm.tqdm(total=BUFFER_SIZE)
-
         sess.run(transfer_op)
         stats_count = sess.run(cmodel.RunningStats.Count)
-        print("Running Statistics Count: %d" % stats_count)
 
         with CPU_SEMAPHORE:
             if stats_count > 0:
@@ -207,8 +203,6 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
                         summary_writer.add_summary(summary_value, global_step=step_count)
 
                         update_idx = step_count // (NUM_EPOCHS * NUM_MINIBATCH)
-                        print("Update %d completed" % update_idx)
-
                         data_present = False
 
             stats_obs_buffer = numpy.reshape(observation_buffer[:, :, 1:], (-1, model.Model.FEATURE_COUNT))
@@ -218,15 +212,20 @@ for rollout in iter(ROLLOUT_QUEUE.get, None):
                                 cmodel.RunningStats.CountInput: stats_obs_buffer.shape[0]})
 
             if stats_count == 0:
+                progress.write("Initializing input statistics with %d data points" % stats_count)
                 utility.apply(lambda server: server.reset(), servers)
                 with ROLLOUT_QUEUE.mutex:
                     ROLLOUT_QUEUE.queue.clear()
             else:
+                progress.write("Update %d completed, %d input statistics collected" % (update_idx, stats_count))
                 utility.apply(lambda hook: hook.update(), map(lambda server: server.Hook, servers))
         if step_count > MAX_EPOCHS * NUM_MINIBATCH:
-            print("Completed training process, terminating session")
+            progress.write("Completed training process, terminating session")
             utility.apply(lambda server: server.stop(), servers)
             break
+            
+        progress.close()
+        progress = tqdm.tqdm(total=BUFFER_SIZE)
 
 utility.apply(lambda thread: thread.join(), server_threads)
 bootstrap_manager.kill()
