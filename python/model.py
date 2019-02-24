@@ -64,6 +64,7 @@ import tensorflow.contrib.cudnn_rnn as rnn
 from tensorflow_probability import distributions
 from functools import reduce
 import numpy as np
+import math
 
 
 def __build_dense__(inputs, num_units, activation=None, initializer=init.orthogonal(),
@@ -100,6 +101,7 @@ def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), res_block_s
                              bias_initializer=init.zeros(), name="ConvEmbedding"):
     num_layers = len(ssizes)
     assert(num_layers % res_block_size == 0)
+    assert(res_block_size >= 2)
     
     with tf.variable_scope(name):
         conv_embedding = tf.layers.conv1d(inputs, initial_dim[0], int(inputs.shape.dims[-1] - initial_dim[1] + 1), 1,
@@ -109,15 +111,14 @@ def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), res_block_s
                                           name="SpatialProjection")
         projection = conv_embedding
 
+        p_filter_size = 0
+        p_stride_size = 1
+        p_max = int(projection.shape.dims[-1])
         for idx in range(len(ssizes)):
+            p_filter_size = p_filter_size + (ssizes[idx] * 3) + (3 - ssizes[idx])
+            p_stride_size = min(p_stride_size * ssizes[idx], p_max)
             num_filters = int(num_units / (2 ** (num_layers - idx - 1)))
 
-            projection = tf.layers.conv1d(projection, num_filters, 3, ssizes[idx],
-                                          data_format='channels_first', activation=None,
-                                          kernel_initializer=init.orthogonal(),
-                                          bias_initializer=bias_initializer,
-                                          padding="SAME",
-                                          name="Projection/%d" % (idx + 1))
             conv_embedding = tf.layers.conv1d(conv_embedding, num_filters, 3, ssizes[idx],
                                               data_format='channels_first', activation=activation,
                                               kernel_initializer=initializer,
@@ -125,8 +126,23 @@ def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), res_block_s
                                               padding="SAME",
                                               name="Convolution/%d" % (idx + 1))
             if idx % res_block_size == 1:
+                p_filter_residue = p_max % p_stride_size
+                p_filter_size = int(p_max / math.ceil(p_max / p_filter_size)) + p_filter_residue
+
+                projection = tf.layers.conv1d(projection, num_filters,
+                                              p_filter_size,
+                                              p_stride_size,
+                                              data_format='channels_first', activation=None,
+                                              kernel_initializer=init.orthogonal(),
+                                              bias_initializer=bias_initializer,
+                                              padding="SAME",
+                                              name="Projection/%d" % (idx + 1))
                 conv_embedding = conv_embedding + projection
                 projection = conv_embedding
+
+                p_filter_size = 0
+                p_stride_size = 1
+                p_max = int(projection.shape.dims[-1])
 
         return tf.reshape(conv_embedding, (-1, conv_embedding.shape[-2]))
 
