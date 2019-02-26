@@ -96,10 +96,11 @@ def __build_embedding__(inputs, num_units, activation=None, initializer=init.ort
                                                   name="Output")
 
 
-def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), initial_dim=(8, 24),
+def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), res_block_size=2, initial_dim=(8, 24),
                              activation=None, initializer=init.orthogonal(),
                              bias_initializer=init.zeros(), name="ConvEmbedding"):
     num_layers = len(ssizes)
+    assert(num_layers % res_block_size == 0)
 
     with tf.variable_scope(name):
         conv_embedding = tf.layers.conv1d(inputs, initial_dim[0], int(inputs.shape.dims[-1] - initial_dim[1] + 1), 1,
@@ -107,11 +108,12 @@ def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), initial_dim
                                           kernel_initializer=init.orthogonal(),
                                           bias_initializer=bias_initializer,
                                           name="SpatialProjection")
+        projection = conv_embedding
 
         for idx in range(len(ssizes)):
             num_filters = int(num_units / (2 ** (num_layers - idx - 1)))
 
-            projection = tf.layers.conv1d(conv_embedding, num_filters, ssizes[idx], ssizes[idx],
+            projection = tf.layers.conv1d(projection, num_filters, ssizes[idx], ssizes[idx],
                                           data_format='channels_first', activation=None,
                                           kernel_initializer=init.orthogonal(),
                                           bias_initializer=bias_initializer,
@@ -123,7 +125,9 @@ def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), initial_dim
                                               bias_initializer=bias_initializer,
                                               padding="SAME",
                                               name="Convolution/%d" % (idx + 1))
-            conv_embedding = conv_embedding + projection
+            if idx % res_block_size == 1:
+                conv_embedding = conv_embedding + projection
+                projection = conv_embedding
 
         return tf.reshape(conv_embedding, (-1, conv_embedding.shape[-2]))
 
