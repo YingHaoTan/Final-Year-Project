@@ -9,6 +9,7 @@ import threading
 import queue
 import os
 import logging
+from enum import Enum
 from functools import reduce
 
 
@@ -24,12 +25,18 @@ class Directory:
     SCRATCH_BOOTSTRAP_DIR = os.path.join(BOOTSTRAP_DIR, "scratch")
 
 
+class ResourceStatus(Enum):
+    Wait = 1
+    Ready = 2
+    Idle = 3
+
+
 class BootstrapManager:
 
     def __init__(self, max_parallelism=1):
         self.IsActive = True
-        self.SemaphoreMap = {}
-        self.ActiveMap = {}
+        self.ResourceMap = {}
+        self.StatusMap = {}
         self.Queue = queue.Queue()
         self.Workers = [threading.Thread(target=self.serve) for _ in range(max_parallelism)]
         utility.apply(lambda worker: worker.start(), self.Workers)
@@ -49,33 +56,30 @@ class BootstrapManager:
                                          stderr=subprocess.DEVNULL)
 
             if returncode == 0:
-                self.SemaphoreMap[identifier].release()
+                self.StatusMap[identifier] = ResourceStatus.Ready
+                self.ResourceMap[identifier].put(1)
             else:
                 self.Queue.put(identifier)
 
     def start_bootstrap(self, identifier):
-        if identifier not in self.ActiveMap:
-            self.ActiveMap[identifier] = False
-            self.SemaphoreMap[identifier] = threading.BoundedSemaphore(1)
-            self.SemaphoreMap[identifier].acquire()
-
-        if not self.ActiveMap[identifier]:
-            self.ActiveMap[identifier] = True
+        if identifier not in self.StatusMap or self.StatusMap[identifier] == ResourceStatus.Idle:
+            if identifier not in self.ResourceMap:
+                self.ResourceMap[identifier] = queue.Queue(1)
+            self.StatusMap[identifier] = ResourceStatus.Wait
             self.Queue.put(identifier)
 
     def obtain_bootstrap(self, identifier):
-        if identifier not in self.ActiveMap or not self.ActiveMap[identifier]:
-            self.start_bootstrap(identifier)
+        self.start_bootstrap(identifier)
+        self.ResourceMap[identifier].get()
 
         scratch_bootstrap_file = os.path.join(Directory.SCRATCH_BOOTSTRAP_DIR, identifier)
         bootstrap_file = os.path.join(Directory.BOOTSTRAP_DIR, identifier)
-        self.SemaphoreMap[identifier].acquire()
 
         if os.path.exists(bootstrap_file):
             os.remove(bootstrap_file)
 
         os.rename(scratch_bootstrap_file, bootstrap_file)
-        self.ActiveMap[identifier] = False
+        self.StatusMap[identifier] = ResourceStatus.Idle
 
         return bootstrap_file
 
