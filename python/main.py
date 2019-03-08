@@ -11,6 +11,10 @@ import logging
 import tqdm
 import colorama
 
+
+tf.logging.set_verbosity(tf.logging.ERROR)
+
+
 CLIENT_PARALLELISM = 1
 SUMMARY_DIR = "summary"
 CHECKPOINT_DIR = "ckpt"
@@ -51,22 +55,24 @@ reward_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS))
 advantage_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS))
 value_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS))
 
+batch_size = BUFFER_SIZE // NUM_MINIBATCH
 dataset = tf.data.Dataset.from_tensor_slices((reset_placeholder, state_placeholder,
                                               obs_placeholder, action_placeholder, log_prob_placeholder,
                                               reward_placeholder, advantage_placeholder, value_placeholder))
 dataset = dataset.shuffle(BUFFER_SIZE)
-dataset = dataset.batch(BUFFER_SIZE // NUM_MINIBATCH)
+dataset = dataset.batch(batch_size)
 dataset = dataset.repeat(NUM_EPOCHS)
 d_iterator = dataset.make_initializable_iterator()
 
+batch_rollout_size = batch_size * ROLLOUT_STEPS
 d_reset, d_state, d_obs, d_action, d_log_prob, d_reward, d_adv, d_value = d_iterator.get_next()
-d_state = tf.reshape(d_state, (BUFFER_SIZE // NUM_MINIBATCH, model.Model.HIDDEN_STATE_COUNT))
-d_obs = tf.transpose(d_obs, (1, 0, 2))
-d_action = tf.reshape(tf.transpose(d_action, (1, 0, 2)), (-1, model.Model.ACTION_COUNT))
-d_log_prob = tf.reshape(tf.transpose(d_log_prob, (1, 0)), [-1])
-d_reward = tf.reshape(tf.transpose(d_reward, (1, 0)), [-1])
-d_adv = tf.reshape(tf.transpose(d_adv, (1, 0)), [-1])
-d_value = tf.reshape(tf.transpose(d_value, (1, 0)), [-1])
+d_state = tf.reshape(d_state, (batch_size, model.Model.HIDDEN_STATE_COUNT))
+d_obs = tf.reshape(tf.transpose(d_obs, (1, 0, 2)), (d_obs.shape[1].value, batch_size, d_obs.shape[2]))
+d_action = tf.reshape(tf.transpose(d_action, (1, 0, 2)), (batch_rollout_size, model.Model.ACTION_COUNT))
+d_log_prob = tf.reshape(tf.transpose(d_log_prob, (1, 0)), (batch_rollout_size,))
+d_reward = tf.reshape(tf.transpose(d_reward, (1, 0)), (batch_rollout_size,))
+d_adv = tf.reshape(tf.transpose(d_adv, (1, 0)), (batch_rollout_size,))
+d_value = tf.reshape(tf.transpose(d_value, (1, 0)), (batch_rollout_size,))
 
 dataset = tf.data.Dataset.from_tensor_slices((obs_placeholder, advantage_placeholder))
 dataset = dataset.map(lambda x, y: (x[:, 0], y))

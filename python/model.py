@@ -64,40 +64,38 @@ import tensorflow.contrib.cudnn_rnn as rnn
 from tensorflow_probability import distributions
 from functools import reduce
 import numpy as np
-import math
 
 
 def __build_dense__(inputs, num_units, activation=None, initializer=init.orthogonal(),
-                    bias_initializer=init.zeros(), use_layer_norm=False, name="dense"):
-    dense = layers.dense(inputs, num_units, activation=None if use_layer_norm else activation,
-                         kernel_initializer=initializer, bias_initializer=bias_initializer,
-                         name=name)
-
-    if use_layer_norm:
-        dense = clayers.layer_norm(dense,
-                                   scale=activation is not None and activation is not tf.nn.relu,
-                                   activation_fn=activation)
-
-    return dense
+                    bias_initializer=init.zeros(), name="dense"):
+    return layers.dense(inputs, num_units, activation=activation,
+                        kernel_initializer=initializer, bias_initializer=bias_initializer,
+                        name=name)
 
 
 def __build_embedding__(inputs, num_units, activation=None, initializer=init.orthogonal(),
-                        bias_initializer=init.zeros(), use_layer_norm=False, name="Embedding"):
+                        bias_initializer=init.zeros(), group_norm_count=0, name="Embedding"):
     with tf.variable_scope(name):
         input_projection = __build_dense__(inputs, num_units, activation=None,
                                            initializer=init.orthogonal(), bias_initializer=bias_initializer,
-                                           use_layer_norm=use_layer_norm, name="Projection")
+                                           name="Projection")
         encoder = __build_dense__(inputs, inputs.shape.dims[-1], activation=activation,
                                   initializer=initializer, bias_initializer=bias_initializer,
-                                  use_layer_norm=use_layer_norm, name="Encoder")
+                                  name="Encoder")
+        output = input_projection + __build_dense__(encoder, num_units, activation=activation, initializer=initializer,
+                                                    bias_initializer=bias_initializer,
+                                                    name="Output")
 
-        return input_projection + __build_dense__(encoder, num_units, activation=activation, initializer=initializer,
-                                                  bias_initializer=bias_initializer, use_layer_norm=use_layer_norm,
-                                                  name="Output")
+        if group_norm_count > 0:
+            output = clayers.group_norm(output, groups=group_norm_count, reduction_axes=[], scale=False,
+                                        scope="GroupNorm")
+
+        return output
 
 
 def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), res_block_size=2, initial_dim=(8, 24),
                              activation=None, initializer=init.orthogonal(),
+                             group_norm_count=0,
                              bias_initializer=init.zeros(), name="ConvEmbedding"):
     num_layers = len(ssizes)
     assert(num_layers % res_block_size == 0)
@@ -126,8 +124,15 @@ def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), res_block_s
                                               padding="SAME",
                                               name="Convolution/%d" % (idx + 1))
             if idx % res_block_size == 1:
-                conv_embedding = conv_embedding + projection
-                projection = conv_embedding
+                resblock = conv_embedding + projection
+
+                if group_norm_count > 0:
+                    resblock = clayers.group_norm(resblock, groups=group_norm_count,
+                                                  channels_axis=-2, reduction_axes=[-1],
+                                                  scale=False, scope="GroupNorm/%d" % (idx + 1))
+
+                conv_embedding = resblock
+                projection = resblock
 
         return tf.reshape(conv_embedding, (-1, conv_embedding.shape[-2]))
 
@@ -404,6 +409,7 @@ class Model:
                                                      activation=tf.nn.relu,
                                                      initializer=init.orthogonal(np.sqrt(2)),
                                                      bias_initializer=init.zeros(),
+                                                     group_norm_count=8,
                                                      name="WeatherEmbedding")
 
         market_embedding = tf.reshape(normalized_inputs[3], (-1, 7, 24))
@@ -412,6 +418,7 @@ class Model:
                                                     activation=tf.nn.relu,
                                                     initializer=init.orthogonal(np.sqrt(2)),
                                                     bias_initializer=init.zeros(),
+                                                    group_norm_count=8,
                                                     name="MarketEmbedding")
 
         tariff_embeddings = []
@@ -424,6 +431,7 @@ class Model:
                                                          Model.TARIFF_EMBEDDING_COUNT,
                                                          activation=tf.nn.relu,
                                                          initializer=init.orthogonal(np.sqrt(2)),
+                                                         group_norm_count=8,
                                                          name="TariffEmbedding"))
 
         tariff_embeddings = tf.concat(tariff_embeddings, axis=-1)
@@ -432,11 +440,12 @@ class Model:
                                market_embedding,
                                tariff_embeddings], axis=-1)
 
-        embedding = __build_dense__(embedding,
-                                    Model.EMBEDDING_COUNT,
-                                    activation=tf.nn.relu,
-                                    initializer=init.orthogonal(np.sqrt(2)),
-                                    name="Embedding")
+        embedding = __build_embedding__(embedding,
+                                        Model.EMBEDDING_COUNT,
+                                        activation=tf.nn.relu,
+                                        initializer=init.orthogonal(np.sqrt(2)),
+                                        group_norm_count=64,
+                                        name="Embedding")
 
         return embedding
 
