@@ -47,7 +47,7 @@ logging.basicConfig(filename="main.log", level=logging.INFO,
                     format="%(asctime)s - %(threadName)s - %(levelname)s - %(message)s")
 
 reset_placeholder = tf.placeholder(tf.bool, BUFFER_SIZE)
-state_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, model.Model.HIDDEN_STATE_COUNT))
+state_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, 2, model.Model.HIDDEN_STATE_COUNT))
 obs_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS, model.Model.FEATURE_COUNT + 1))
 action_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS, model.Model.ACTION_COUNT))
 log_prob_placeholder = tf.placeholder(tf.float32, (BUFFER_SIZE, ROLLOUT_STEPS))
@@ -66,7 +66,7 @@ d_iterator = dataset.make_initializable_iterator()
 
 batch_rollout_size = batch_size * ROLLOUT_STEPS
 d_reset, d_state, d_obs, d_action, d_log_prob, d_reward, d_adv, d_value = d_iterator.get_next()
-d_state = tf.reshape(d_state, (batch_size, model.Model.HIDDEN_STATE_COUNT))
+d_state = tf.reshape(d_state, (batch_size, 2, model.Model.HIDDEN_STATE_COUNT))
 d_obs = tf.reshape(tf.transpose(d_obs, (1, 0, 2)), (d_obs.shape[1].value, batch_size, d_obs.shape[2]))
 d_action = tf.reshape(tf.transpose(d_action, (1, 0, 2)), (batch_rollout_size, model.Model.ACTION_COUNT))
 d_log_prob = tf.reshape(tf.transpose(d_log_prob, (1, 0)), (batch_rollout_size,))
@@ -161,7 +161,7 @@ server_threads = [threading.Thread(target=server.serve, kwargs={"session": sess}
 utility.apply(lambda thread: thread.start(), server_threads)
 
 reset_buffer = numpy.zeros(shape=BUFFER_SIZE, dtype=numpy.bool)
-state_buffer = numpy.zeros(shape=(BUFFER_SIZE, model.Model.HIDDEN_STATE_COUNT),
+state_buffer = numpy.zeros(shape=(BUFFER_SIZE, 2, model.Model.HIDDEN_STATE_COUNT),
                            dtype=numpy.float32)
 observation_buffer = numpy.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS, model.Model.FEATURE_COUNT + 1),
                                  dtype=numpy.float32)

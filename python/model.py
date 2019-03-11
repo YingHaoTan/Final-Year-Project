@@ -108,6 +108,7 @@ def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), res_block_s
                                           name="SpatialProjection")
         projection = conv_embedding
 
+        resblock_count = 0
         for idx in range(len(ssizes)):
             num_filters = int(num_units / (2 ** (num_layers - idx - 1)))
 
@@ -127,12 +128,16 @@ def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), res_block_s
                 resblock = conv_embedding + projection
 
                 if group_norm_count > 0:
-                    resblock = clayers.group_norm(resblock, groups=group_norm_count,
+                    max_resblock_layers = num_layers // res_block_size
+                    res_idx = (idx + 1) // res_block_size
+                    down_sample_group = int(group_norm_count / (2 ** (max_resblock_layers - res_idx)))
+                    resblock = clayers.group_norm(resblock, groups=down_sample_group,
                                                   channels_axis=-2, reduction_axes=[-1],
                                                   scale=False, scope="GroupNorm/%d" % (idx + 1))
 
                 conv_embedding = resblock
                 projection = resblock
+                resblock_count = resblock_count + 1
 
         return tf.reshape(conv_embedding, (-1, conv_embedding.shape[-2]))
 
@@ -371,14 +376,16 @@ class Model:
 
             embedding = Model.__build_input_embedding__(normalized_inputs)
             embedding = tf.reshape(embedding, [inputs_shape.dims[0], -1, embedding.shape.dims[-1]])
-            hidden_cell = rnn.CudnnGRU(1, Model.HIDDEN_STATE_COUNT, kernel_initializer=init.orthogonal(),
-                                       bias_initializer=init.zeros(), name="%s/HState" % name)
+            hidden_cell = rnn.CudnnLSTM(1, Model.HIDDEN_STATE_COUNT, kernel_initializer=init.orthogonal(),
+                                        bias_initializer=init.zeros(), name="%s/HState" % name)
             initial_state_var = tf.get_variable(name="%s/IState" % name, shape=self.state_shapes(1),
                                                 initializer=init.zeros(), trainable=True)
-            reset_state = tf.reshape(reset_state, (-1, 1))
+            reset_state = tf.reshape(reset_state, (-1, 1, 1))
             state_in = tf.to_float(reset_state) * initial_state_var + (1 - tf.to_float(reset_state)) * state_in
+            unstacked_state_in = tf.expand_dims(state_in, axis=0)
+            unstacked_state_in = tuple(tf.unstack(unstacked_state_in, axis=2))
 
-            hidden_state, state_out = hidden_cell(embedding, tuple([tf.expand_dims(state_in, axis=0)]))
+            hidden_state, state_out = hidden_cell(embedding, unstacked_state_in)
             hidden_state = tf.reshape(hidden_state, [-1, Model.HIDDEN_STATE_COUNT])
 
             market_policies = Model.__build_market_policies__(hidden_state)
@@ -388,7 +395,7 @@ class Model:
             self.Inputs = inputs
             self.Embedding = embedding
             self.RunningStats = running_stats
-            self.StateOut = tf.squeeze(state_out[0], axis=0)
+            self.StateOut = tf.squeeze(tf.stack(state_out, 2), axis=0)
             self.InitialState = tf.ones_like(state_in, dtype=tf.float32) * initial_state_var
             self.Policies = GroupedPolicy([market_policies, tariff_policies], name="Policy")
             self.StateValue = __build_dense__(hidden_state, 1, name="StateValue")
@@ -431,7 +438,7 @@ class Model:
                                                          Model.TARIFF_EMBEDDING_COUNT,
                                                          activation=tf.nn.relu,
                                                          initializer=init.orthogonal(np.sqrt(2)),
-                                                         group_norm_count=8,
+                                                         group_norm_count=4,
                                                          name="TariffEmbedding"))
 
         tariff_embeddings = tf.concat(tariff_embeddings, axis=-1)
@@ -444,7 +451,7 @@ class Model:
                                         Model.EMBEDDING_COUNT,
                                         activation=tf.nn.relu,
                                         initializer=init.orthogonal(np.sqrt(2)),
-                                        group_norm_count=64,
+                                        group_norm_count=32,
                                         name="Embedding")
 
         return embedding
@@ -490,4 +497,4 @@ class Model:
 
     @staticmethod
     def state_shapes(batch_size):
-        return [batch_size, Model.HIDDEN_STATE_COUNT]
+        return [batch_size, 2, Model.HIDDEN_STATE_COUNT]
