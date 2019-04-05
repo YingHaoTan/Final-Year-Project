@@ -24,21 +24,21 @@ Inputs:
     Bootstrap customer count per PowerType [301 - 313]
     Bootstrap customer power usage per PowerType [314 - 326]
 
-    Tariff PowerType category [327 - 340]
-    Total number of subscribers for tariff [341]
-    Average power usage per customer for tariff in the previous timeslot [342]
-    Time of use rate [343 - 348]
-    Time of use maximum curtailment value [349 - 354]
-    Tariff fixed rate [355]
-    Fixed rate maximum curtailment value [356]
-    Up regulation rate [357]
-    Down regulation rate [358]
-    Up regulation BO [359]
-    Down regulation BO [360]
-    Periodic payment [361]
-    Early withdrawal penalty [362]
+    Tariff PowerType category [327]
+    Total number of subscribers for tariff [328]
+    Average power usage per customer for tariff in the previous timeslot [329]
+    Time of use rate [330 - 335]
+    Time of use maximum curtailment value [336 - 341]
+    Tariff fixed rate [342]
+    Fixed rate maximum curtailment value [343]
+    Up regulation rate [344]
+    Down regulation rate [345]
+    Up regulation BO [346]
+    Down regulation BO [347]
+    Periodic payment [348]
+    Early withdrawal penalty [349]
 
-    Same structure as above section x 19 [363 - 1046]
+    Same structure as above section x 19 [350 - 786]
 
 Outputs:
     Market Outputs:
@@ -57,103 +57,322 @@ Outputs:
     1 linear output representing V(s)
 """
 import tensorflow as tf
-import tensorflow.layers as layers
-import tensorflow.initializers as init
-import tensorflow.contrib.layers as clayers
 import tensorflow.contrib.cudnn_rnn as rnn
+from tensorflow import initializers as init
 from tensorflow_probability import distributions
 from functools import reduce
+from typing import Union
 import numpy as np
 
 
-def __build_dense__(inputs, num_units, activation=None, initializer=init.orthogonal(),
-                    bias_initializer=init.zeros(), name="dense"):
-    return layers.dense(inputs, num_units, activation=activation,
-                        kernel_initializer=initializer, bias_initializer=bias_initializer,
-                        name=name)
+class NetworkModule:
+    """Abstract base class for neural network modules"""
+
+    def __init__(self):
+        self.__built__ = False
+        self.__weight_map__ = {}
+
+    @property
+    def weights(self):
+        """Returns a list of trainable weights used by this neural network module"""
+        return list(self.__weight_map__.values())
+
+    @property
+    def trainable_weights(self):
+        return list(filter(lambda x: x.trainable, self.weights))
+
+    def build(self, input_shape: Union[list, tuple]):
+        """Build neural network module that with appropriate size to accomodate the specified input shape"""
+        self.__built__ = True
+
+    def __call__(self, inputs: tf.Tensor, *args, **kwargs):
+        """Process the input tensor through this neural network module"""
+        if not self.__built__:
+            self.build(inputs.shape.as_list())
 
 
-def __build_embedding__(inputs, num_units, activation=None, initializer=init.orthogonal(),
-                        bias_initializer=init.zeros(), group_norm_count=0, name="Embedding"):
-    with tf.variable_scope(name):
-        input_projection = __build_dense__(inputs, num_units, activation=None,
-                                           initializer=init.orthogonal(), bias_initializer=bias_initializer,
-                                           name="Projection")
-        encoder = __build_dense__(inputs, inputs.shape.dims[-1], activation=activation,
-                                  initializer=initializer, bias_initializer=bias_initializer,
-                                  name="Encoder")
-        output = input_projection + __build_dense__(encoder, num_units, activation=activation, initializer=initializer,
-                                                    bias_initializer=bias_initializer,
-                                                    name="Output")
+class InputNormalizer(NetworkModule):
+    """
+        InputNormalizer is a module that aggregates mean and variance statistics
+        to perform normalization on the input data
+    """
 
-        if group_norm_count > 0:
-            output = clayers.group_norm(output, groups=group_norm_count, reduction_axes=[], scale=False,
-                                        scope="GroupNorm")
+    def __init__(self, epsilon=1e-8):
+        super().__init__()
+        self.__epsilon__ = epsilon
+        self.__mean__ = tf.placeholder(tf.float32)
+        self.__var__ = tf.placeholder(tf.float32)
+        self.__count__ = tf.placeholder(tf.float32)
+        self.__update_op__ = None
+
+    def update(self, session, mean, var, count):
+        session.run(self.__update_op__, feed_dict={self.__mean__: mean, self.__var__: var, self.__count__: count})
+
+    def build(self, input_shape: list):
+        super().build(input_shape)
+
+        self.__weight_map__['mean'] = tf.Variable(tf.zeros((1, input_shape[-1])), trainable=False)
+        self.__weight_map__['var'] = tf.Variable(tf.zeros((1, input_shape[-1])), trainable=False)
+        self.__weight_map__['count'] = tf.Variable(tf.zeros(()), trainable=False)
+
+        mean, var, count = tf.cond(self.__weight_map__['count'] > 0.0,
+                                   lambda: self.__calculate_statistics__(),
+                                   lambda: (self.__mean__, self.__var__, self.__count__))
+        self.__update_op__ = tf.group([
+            tf.assign(self.__weight_map__['mean'], mean),
+            tf.assign(self.__weight_map__['var'], var),
+            tf.assign(self.__weight_map__['count'], count)
+        ])
+
+    def __call__(self, inputs: tf.Tensor, *args, **kwargs):
+        super().__call__(inputs, *args, **kwargs)
+
+        with tf.name_scope(type(self).__name__):
+            mask = kwargs['mask']
+            broadcast_mask = tf.tile(tf.expand_dims(mask, axis=0),
+                                     tf.concat([tf.shape(inputs)[:1], tf.ones(1, tf.int32)], axis=0))
+            outputs = (inputs - self.__weight_map__['mean']) / tf.sqrt(self.__weight_map__['var'] + self.__epsilon__)
+            outputs = tf.where(broadcast_mask, outputs, inputs)
+
+        return outputs
+
+    def __calculate_statistics__(self):
+        count = self.__count__ + self.__weight_map__['count']
+        count_input_f, count_f, new_count_f = (self.__count__, self.__weight_map__['count'], count)
+
+        delta = self.__mean__ - self.__weight_map__['mean']
+        mean = self.__weight_map__['mean'] + delta * count_input_f / new_count_f
+        m_a = self.__weight_map__['var'] * count_f
+        m_b = self.__var__ * count_input_f
+        m = m_a + m_b + tf.square(delta) * count_f * count_input_f / new_count_f
+        var = m / new_count_f
+
+        return mean, var, count
+
+
+class ConvolutionEncoder(NetworkModule):
+    """ConvolutionEncoder to encode inputs using convolutional neural network"""
+
+    def __init__(self, num_output, initial_dim=(8, 24),
+                 ssizes=(2, 2, 2, 3), res_block_size=2, activation=tf.nn.relu,
+                 kernel_initializer=init.orthogonal(np.sqrt(2)), bias_initializer=init.zeros()):
+        super().__init__()
+        self.__num_output__ = num_output
+        self.__num_layers__ = len(ssizes)
+        self.__projection_size__ = initial_dim
+        self.__strides__ = ssizes
+        self.__block_size__ = res_block_size
+        self.__activation__ = activation
+        self.__kernel_initializer__ = kernel_initializer
+        self.__bias_initializer__ = bias_initializer
+
+    def build(self, input_shape: Union[list, tuple]):
+        """
+            Input shape format in NCH
+            ConvolutionEncoder kernel upgrades the shape to NCH1 to perform convolution
+        """
+        super().build(input_shape)
+        l_initializer = init.orthogonal()
+        k_initializer = self.__kernel_initializer__
+        b_initializer = self.__bias_initializer__
+
+        kernel_size = (int(input_shape[-1] - self.__projection_size__[1] + 1), 1,
+                       input_shape[1], self.__projection_size__[0])
+        self.__weight_map__['initial_projection_kernel'] = tf.Variable(l_initializer(kernel_size))
+        self.__weight_map__['initial_projection_bias'] = tf.Variable(b_initializer(self.__projection_size__[0]))
+
+        for idx in range(self.__num_layers__):
+            out_c = int(self.__num_output__ / (2 ** (self.__num_layers__ - idx - 1)))
+
+            kernel_size = (3, 1, kernel_size[-1], out_c)
+            self.__weight_map__["conv_kernel_%d" % idx] = tf.Variable(k_initializer(kernel_size))
+            self.__weight_map__["conv_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
+
+            kernel_size = (self.__strides__[idx], 1, kernel_size[-2], out_c)
+            self.__weight_map__["projection_kernel_%d" % idx] = tf.Variable(l_initializer(kernel_size))
+            self.__weight_map__["projection_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
+
+            if idx % self.__block_size__ == 1:
+                residx = idx // self.__block_size__
+                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(b_initializer((1, out_c, 1, 1)))
+
+    def __call__(self, inputs: tf.Tensor, *args, **kwargs):
+        super().__call__(inputs, *args, **kwargs)
+
+        with tf.name_scope(type(self).__name__):
+            expanded_inputs = tf.expand_dims(inputs, axis=-1)
+
+            conv_output = tf.nn.bias_add(tf.nn.conv2d(expanded_inputs, self.__weight_map__['initial_projection_kernel'],
+                                                      [1, 1, 1, 1], padding='VALID', data_format='NCHW',
+                                                      name='SpatialProjection'),
+                                         self.__weight_map__['initial_projection_bias'],
+                                         data_format='NCHW')
+            projection = conv_output
+
+            for idx in range(self.__num_layers__):
+                projection = tf.nn.bias_add(tf.nn.conv2d(projection,
+                                                         self.__weight_map__["projection_kernel_%d" % idx],
+                                                         [1, 1, self.__strides__[idx], 1],
+                                                         padding='SAME', data_format='NCHW', name="Conv%d" % idx),
+                                            self.__weight_map__["projection_bias_%d" % idx],
+                                            data_format='NCHW')
+                conv_output = tf.nn.bias_add(tf.nn.conv2d(conv_output,
+                                                          self.__weight_map__["conv_kernel_%d" % idx],
+                                                          [1, 1, self.__strides__[idx], 1],
+                                                          padding='SAME', data_format='NCHW',
+                                                          name="Conv%d" % idx),
+                                             self.__weight_map__["conv_bias_%d" % idx],
+                                             data_format='NCHW')
+                conv_output = self.__activation__(conv_output)
+
+                if idx % self.__block_size__ == 1:
+                    residx = idx // self.__block_size__
+                    resgate = tf.nn.sigmoid(self.__weight_map__["resgate_kernel_%d" % residx])
+                    conv_output = projection = ((1 - resgate) * conv_output) + (resgate * projection)
+
+            conv_output_shape = conv_output.shape.as_list()
+            output = tf.reshape(conv_output, (-1, conv_output_shape[1] * conv_output_shape[2] * conv_output_shape[3]))
 
         return output
 
 
-def __build_conv_embedding__(inputs, num_units, ssizes=(2, 2, 2, 3), res_block_size=2, initial_dim=(8, 24),
-                             activation=None, initializer=init.orthogonal(),
-                             group_norm_count=0,
-                             bias_initializer=init.zeros(), name="ConvEmbedding"):
-    num_layers = len(ssizes)
-    assert(num_layers % res_block_size == 0)
+class DepthEncoder(NetworkModule):
+    """DepthEncoder to encode the depth/channel of a convolutional neural network"""
 
-    with tf.variable_scope(name):
-        conv_embedding = tf.layers.conv1d(inputs, initial_dim[0], int(inputs.shape.dims[-1] - initial_dim[1] + 1), 1,
-                                          data_format='channels_first', activation=None,
-                                          kernel_initializer=init.orthogonal(),
-                                          bias_initializer=bias_initializer,
-                                          name="SpatialProjection")
-        projection = conv_embedding
+    def __init__(self, num_output, num_layers=2, res_block_size=2, activation=tf.nn.relu,
+                 kernel_initializer=init.orthogonal(np.sqrt(2)), bias_initializer=init.zeros()):
+        super().__init__()
+        self.__num_output__ = num_output
+        self.__num_layers__ = num_layers
+        self.__block_size__ = res_block_size
+        self.__activation__ = activation
+        self.__kernel_initializer__ = kernel_initializer
+        self.__bias_initializer__ = bias_initializer
 
-        resblock_count = 0
-        for idx in range(len(ssizes)):
-            num_filters = int(num_units / (2 ** (num_layers - idx - 1)))
+    def build(self, input_shape: Union[list, tuple]):
+        """
+            Input shape format in NCH
+            DepthEncoder kernel upgrades the shape to NCH1 to perform convolution
+        """
+        super().build(input_shape)
+        l_initializer = init.orthogonal()
+        k_initializer = self.__kernel_initializer__
+        b_initializer = self.__bias_initializer__
 
-            projection = tf.layers.conv1d(projection, num_filters, ssizes[idx], ssizes[idx],
-                                          data_format='channels_first', activation=None,
-                                          kernel_initializer=init.orthogonal(),
-                                          bias_initializer=bias_initializer,
-                                          padding="SAME",
-                                          name="Projection/%d" % (idx + 1))
-            conv_embedding = tf.layers.conv1d(conv_embedding, num_filters, 3, ssizes[idx],
-                                              data_format='channels_first', activation=activation,
-                                              kernel_initializer=initializer,
-                                              bias_initializer=bias_initializer,
-                                              padding="SAME",
-                                              name="Convolution/%d" % (idx + 1))
-            if idx % res_block_size == 1:
-                resblock = conv_embedding + projection
+        kernel_size = (1, 1, 1, input_shape[1])
+        inc_layer_count = (self.__num_output__ - input_shape[1]) // self.__num_layers__
+        for idx in range(self.__num_layers__):
+            if idx < self.__num_layers__ - 1:
+                out_c = kernel_size[-1] + inc_layer_count
+            else:
+                out_c = self.__num_output__
+                
+            kernel_size = (1, 1, kernel_size[-1], out_c)
+            self.__weight_map__["conv_kernel_%d" % idx] = tf.Variable(k_initializer(kernel_size))
+            self.__weight_map__["conv_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
 
-                if group_norm_count > 0:
-                    max_resblock_layers = num_layers // res_block_size
-                    res_idx = (idx + 1) // res_block_size
-                    down_sample_group = int(group_norm_count / (2 ** (max_resblock_layers - res_idx)))
-                    resblock = clayers.group_norm(resblock, groups=down_sample_group,
-                                                  channels_axis=-2, reduction_axes=[-1],
-                                                  scale=False, scope="GroupNorm/%d" % (idx + 1))
+            kernel_size = (1, 1, kernel_size[-2], out_c)
+            self.__weight_map__["projection_kernel_%d" % idx] = tf.Variable(l_initializer(kernel_size))
+            self.__weight_map__["projection_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
 
-                conv_embedding = resblock
-                projection = resblock
-                resblock_count = resblock_count + 1
+            if idx % self.__block_size__ == 1:
+                residx = idx // self.__block_size__
+                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(b_initializer((1, out_c, 1, 1)))
 
-        return tf.reshape(conv_embedding, (-1, conv_embedding.shape[-2]))
+    def __call__(self, inputs: tf.Tensor, *args, **kwargs):
+        super().__call__(inputs, *args, **kwargs)
+
+        with tf.name_scope(type(self).__name__):
+            expanded_inputs = tf.expand_dims(inputs, axis=-1)
+
+            conv_output = projection = expanded_inputs
+            for idx in range(self.__num_layers__):
+                projection = tf.nn.bias_add(tf.nn.conv2d(projection, self.__weight_map__["projection_kernel_%d" % idx],
+                                                         [1, 1, 1, 1], padding='VALID',
+                                                         data_format='NCHW', name="Conv%d" % idx),
+                                            self.__weight_map__["projection_bias_%d" % idx],
+                                            data_format='NCHW')
+                conv_output = tf.nn.bias_add(tf.nn.conv2d(conv_output,
+                                                          self.__weight_map__["conv_kernel_%d" % idx],
+                                                          [1, 1, 1, 1], padding='VALID',
+                                                          data_format='NCHW', name="Conv%d" % idx),
+                                             self.__weight_map__["conv_bias_%d" % idx],
+                                             data_format='NCHW')
+                conv_output = self.__activation__(conv_output)
+
+                if idx % self.__block_size__ == 1:
+                    residx = idx // self.__block_size__
+                    resgate = tf.nn.sigmoid(self.__weight_map__["resgate_kernel_%d" % residx])
+                    conv_output = projection = ((1 - resgate) * conv_output) + (resgate * projection)
+
+            conv_output_shape = conv_output.shape.as_list()
+            output = tf.reshape(conv_output, (-1, conv_output_shape[1] * conv_output_shape[2] * conv_output_shape[3]))
+
+        return output
 
 
-class Policy:
+class DenseEncoder(NetworkModule):
+    """DenseEncoder to represent a fully connected neural network"""
 
-    def __init__(self, name):
-        self.Name = name
+    def __init__(self, num_output, num_layers=2, res_block_size=2, activation=tf.nn.relu,
+                 kernel_initializer=init.orthogonal(np.sqrt(2)), bias_initializer=init.zeros()):
+        super().__init__()
+        self.__num_output__ = num_output
+        self.__num_layers__ = num_layers
+        self.__block_size__ = res_block_size
+        self.__activation__ = activation
+        self.__kernel_initializer__ = kernel_initializer
+        self.__bias_initializer__ = bias_initializer
 
-    def num_outputs(self):
-        raise NotImplementedError
+    def build(self, input_shape: list):
+        super().build(input_shape)
+        l_initializer = init.orthogonal()
+        k_initializer = self.__kernel_initializer__
+        b_initializer = self.__bias_initializer__
 
-    def mode(self):
-        raise NotImplementedError
+        kernel_size = (1, input_shape[1])
+        inc_layer_count = (self.__num_output__ - input_shape[1]) // self.__num_layers__
+        for idx in range(self.__num_layers__):
+            if idx < self.__num_layers__ - 1:
+                out_c = kernel_size[-1] + inc_layer_count
+            else:
+                out_c = self.__num_output__
 
-    def log_prob(self, x):
+            kernel_size = (kernel_size[-1], out_c)
+            self.__weight_map__["dense_kernel_%d" % idx] = tf.Variable(k_initializer(kernel_size))
+            self.__weight_map__["dense_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
+
+            kernel_size = (kernel_size[-2], out_c)
+            self.__weight_map__["projection_kernel_%d" % idx] = tf.Variable(l_initializer(kernel_size))
+            self.__weight_map__["projection_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
+
+            if idx % self.__block_size__ == 1:
+                residx = idx // self.__block_size__
+                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(b_initializer((1, out_c)))
+
+    def __call__(self, inputs: tf.Tensor, *args, **kwargs):
+        super().__call__(inputs)
+
+        with tf.name_scope(type(self).__name__):
+            output = projection = inputs
+            for idx in range(self.__num_layers__):
+                projection = tf.nn.bias_add(tf.matmul(projection, self.__weight_map__["projection_kernel_%d" % idx]),
+                                            self.__weight_map__["projection_bias_%d" % idx])
+                output = self.__activation__(tf.nn.bias_add(tf.matmul(output,
+                                                                      self.__weight_map__["dense_kernel_%d" % idx]),
+                                                            self.__weight_map__["dense_bias_%d" % idx]))
+
+                if idx % self.__block_size__ == 1:
+                    residx = idx // self.__block_size__
+                    resgate = tf.nn.sigmoid(self.__weight_map__["resgate_kernel_%d" % residx])
+                    output = projection = ((1 - resgate) * output) + (resgate * projection)
+
+        return output
+
+
+class PolicyOutput:
+
+    def log_prob(self, x: tf.Tensor):
         raise NotImplementedError
 
     def entropy(self):
@@ -162,339 +381,370 @@ class Policy:
     def sample(self):
         raise NotImplementedError
 
-
-class GroupedPolicy(Policy):
-
-    def __init__(self, policy_group, name="GroupedPolicy"):
-        super().__init__(name)
-        self.PolicyGroup = policy_group
-
-    def num_outputs(self):
-        return reduce(lambda x, y: x + y, map(lambda policy: policy.num_outputs(), self.PolicyGroup))
-
     def mode(self):
-        return tf.concat([policy.mode() for policy in self.PolicyGroup], axis=-1)
+        raise NotImplementedError
 
-    def log_prob(self, x):
-        logprobs = []
-        index = 0
-        for policy in self.PolicyGroup:
-            nindex = index + policy.num_outputs()
-            logprobs.append(tf.reshape(policy.log_prob(x[:, index: nindex]), (-1, 1)))
-            index = nindex
 
-        return tf.reduce_sum(tf.concat(logprobs, axis=1), axis=1)
+class DistributionOutput(PolicyOutput):
+
+    def __init__(self, distribution, stop_entropy_gradient=False):
+        self.__distribution__ = distribution
+        self.__stop_entropy_gradient__ = stop_entropy_gradient
+
+    @staticmethod
+    def __conform_shape_ndims__(tensor: tf.Tensor, ndims=1):
+        if tensor.shape.ndims > ndims:
+            return tf.reduce_sum(tensor, axis=list(range(ndims, tensor.shape.ndims)))
+        elif tensor.shape.ndims < ndims:
+            return tf.reshape(tensor, list(map(lambda x: -1 if x is None else x, tensor.shape.as_list())) +
+                              [1 for _ in range(ndims - tensor.shape.ndims)])
+        else:
+            return tensor
+
+    def log_prob(self, x: tf.Tensor):
+        expected_ndims = self.__distribution__.batch_shape.ndims + self.__distribution__.event_shape.ndims
+        t_x = DistributionOutput.__conform_shape_ndims__(x, ndims=expected_ndims)
+
+        if self.__distribution__.dtype == tf.float32:
+            log_prob = self.__distribution__.log_prob(t_x)
+        else:
+            log_prob = self.__distribution__.log_prob(tf.cast(t_x, self.__distribution__.dtype))
+
+        return DistributionOutput.__conform_shape_ndims__(log_prob)
 
     def entropy(self):
-        return tf.reduce_sum(tf.concat([tf.reshape(policy.entropy(), (-1, 1))
-                                        for policy in self.PolicyGroup], axis=1), axis=1)
+        if self.__stop_entropy_gradient__:
+            ent = tf.stop_gradient(self.__distribution__.entropy())
+        else:
+            ent = self.__distribution__.entropy()
+
+        return DistributionOutput.__conform_shape_ndims__(ent)
 
     def sample(self):
-        return tf.concat([policy.sample() for policy in self.PolicyGroup], axis=-1)
+        if self.__distribution__.dtype == tf.float32:
+            samples = self.__distribution__.sample()
+        else:
+            samples = tf.cast(self.__distribution__.sample(), tf.float32)
+
+        return DistributionOutput.__conform_shape_ndims__(samples, ndims=2)
+
+    def mode(self):
+        if self.__distribution__.dtype == tf.float32:
+            samples = self.__distribution__.mode()
+        else:
+            samples = tf.cast(self.__distribution__.mode(), tf.float32)
+
+        return DistributionOutput.__conform_shape_ndims__(samples, ndims=2)
 
 
-class BooleanPolicy(Policy):
+class PolicyModule(NetworkModule):
 
-    def __init__(self, inputs, name="BooleanPolicy"):
-        super().__init__(name)
-        self.Probability = tf.squeeze(__build_dense__(inputs, 1, name=name), axis=-1)
-        self.Distribution = distributions.Bernoulli(logits=self.Probability)
-        self.__sample__ = tf.expand_dims(tf.cast(self.Distribution.sample(), tf.float32), axis=1)
+    @property
+    def num_outputs(self):
+        raise NotImplementedError
 
+    @property
+    def num_inputs(self):
+        raise NotImplementedError
+
+
+class GroupPolicy(PolicyModule):
+
+    def __init__(self, policies: Union[list, tuple]):
+        super().__init__()
+        self.__policies__ = policies
+        
+    @property
+    def weights(self):
+        return reduce(lambda x, y: x + y, map(lambda x: x.weights, self.__policies__))
+
+    @property
+    def num_outputs(self):
+        return reduce(lambda x, y: x + y, map(lambda x: x.num_outputs, self.__policies__))
+
+    @property
+    def num_inputs(self):
+        return reduce(lambda x, y: x + y, map(lambda x: x.num_inputs, self.__policies__))
+
+    def __call__(self, inputs: tf.Tensor, *args, **kwargs):
+        super().__call__(inputs, *args, **kwargs)
+        policies = self.__policies__
+
+        class Output(PolicyOutput):
+
+            def __init__(self):
+                input_split = tf.split(inputs, list(map(lambda x: x.num_inputs, policies)), axis=1)
+                self.__policy_outputs__ = list(map(lambda x: x[0](x[1]), zip(policies, input_split)))
+
+            def log_prob(self, x: tf.Tensor):
+                x_split = tf.split(x, list(map(lambda y: y.num_outputs, policies)), axis=1)
+                log_probs = tf.stack(list(map(lambda y: y[0].log_prob(y[1]), zip(self.__policy_outputs__, x_split))),
+                                     axis=1)
+                log_probs = tf.reduce_sum(log_probs, axis=1)
+
+                return log_probs
+
+            def entropy(self):
+                ent = tf.stack(list(map(lambda x: x.entropy(), self.__policy_outputs__)), axis=1)
+                ent = tf.reduce_sum(ent, axis=1)
+
+                return ent
+
+            def sample(self):
+                sample = tf.concat(list(map(lambda x: x.sample(), self.__policy_outputs__)), axis=1)
+
+                return sample
+
+            def mode(self):
+                action = tf.concat(list(map(lambda x: x.mode(), self.__policy_outputs__)), axis=1)
+
+                return action
+
+        return Output()
+
+
+class BetaPolicy(PolicyModule):
+
+    def __init__(self, num_outputs):
+        super().__init__()
+        self.__num_outputs__ = num_outputs
+        self.__dist__ = None
+
+    @property
+    def num_outputs(self):
+        return self.__num_outputs__
+
+    @property
+    def num_inputs(self):
+        return self.__num_outputs__ * 2
+
+    def __call__(self, inputs: tf.Tensor, *args, **kwargs):
+        super().__call__(inputs, *args, **kwargs)
+        concentrations = tf.exp(inputs) + 1.0
+        concentrations = tf.split(concentrations, 2, axis=1)
+
+        class Output(DistributionOutput):
+
+            def log_prob(self, x: tf.Tensor):
+                rounding_value = np.finfo(x.dtype.as_numpy_dtype).tiny
+                return super().log_prob(tf.clip_by_value(x, rounding_value, 1.0 - rounding_value))
+
+        return Output(distributions.Beta(*concentrations), stop_entropy_gradient=True)
+
+
+class BooleanPolicy(PolicyModule):
+
+    def __init__(self, num_outputs):
+        super().__init__()
+        self.__num_outputs__ = num_outputs
+
+    @property
+    def num_outputs(self):
+        return self.__num_outputs__
+
+    @property
+    def num_inputs(self):
+        return self.__num_outputs__
+
+    def __call__(self, inputs: tf.Tensor, *args, **kwargs):
+        super().__call__(inputs, *args, **kwargs)
+        return DistributionOutput(distributions.Bernoulli(inputs))
+
+
+class CategoricalPolicy(PolicyModule):
+
+    def __init__(self, num_categories):
+        super().__init__()
+        self.__num_categories__ = num_categories
+        self.__dist__ = None
+
+    @property
     def num_outputs(self):
         return 1
 
-    def mode(self):
-        return tf.expand_dims(tf.cast(tf.greater(self.Probability, 0.5), tf.float32), axis=1)
+    @property
+    def num_inputs(self):
+        return self.__num_categories__
 
-    def entropy(self):
-        return self.Distribution.entropy()
-
-    def log_prob(self, x):
-        return self.Distribution.log_prob(tf.cast(tf.squeeze(x, axis=-1), tf.int32))
-
-    def sample(self):
-        return self.__sample__
+    def __call__(self, inputs: tf.Tensor, *args, **kwargs):
+        super().__call__(inputs, *args, **kwargs)
+        return DistributionOutput(distributions.Categorical(inputs))
 
 
-class CategoricalPolicy(Policy):
+class GaussianPolicy(PolicyModule):
 
-    def __init__(self, inputs, num_categories, name="CategoricalPolicy"):
-        super().__init__(name)
-        self.Logits = __build_dense__(inputs, num_categories, name=name)
-        self.Distribution = distributions.Categorical(logits=self.Logits)
-        self.NumCategories = num_categories
-        self.__sample__ = tf.expand_dims(tf.cast(self.Distribution.sample(), tf.float32), axis=1)
+    def __init__(self, num_outputs):
+        super().__init__()
+        self.__num_outputs__ = num_outputs
+        self.__dist__ = None
 
+    @property
     def num_outputs(self):
-        return 1
+        return self.__num_outputs__
 
-    def mode(self):
-        return tf.expand_dims(tf.cast(tf.argmax(self.Logits, axis=-1), tf.float32), axis=1)
+    @property
+    def num_inputs(self):
+        return self.__num_outputs__
 
-    def entropy(self):
-        return self.Distribution.entropy()
+    def build(self, input_shape: Union[list, tuple]):
+        super().build(input_shape)
+        self.__weight_map__['log_std_params'] = tf.Variable(init.zeros()(self.__num_outputs__))
 
-    def log_prob(self, x):
-        return self.Distribution.log_prob(tf.cast(tf.squeeze(x, axis=-1), tf.int32))
+    def __call__(self, inputs: tf.Tensor, *args, **kwargs):
+        super().__call__(inputs, *args, **kwargs)
+        return DistributionOutput(distributions.MultivariateNormalDiag(inputs,
+                                                                       tf.exp(self.__weight_map__['log_std_params'])),
+                                  stop_entropy_gradient=True)
 
-    def sample(self):
-        return self.__sample__
+
+class StateNetwork(NetworkModule):
+    """StateNetwork is a neural network module that produces a state encoding of an agent's perceived state"""
+
+    def __init__(self):
+        super().__init__()
+        self.__power_type_encoding_size__ = 2
+        self.__input_normalizer__ = InputNormalizer()
+        self.__weather_encoder__ = ConvolutionEncoder(128)
+        self.__market_encoder__ = ConvolutionEncoder(128)
+        self.__tariff_encoder__ = DepthEncoder(16)
+        self.__observation_encoder__ = DenseEncoder(512)
+        self.__state_encoder__ = rnn.CudnnLSTM(1, 1024,
+                                               kernel_initializer=init.orthogonal(),
+                                               bias_initializer=init.zeros())
+        self.__normalization_mask__ = tf.convert_to_tensor([*([False] * 4), *([True] * 3),
+                                                            *([True, True, True, False, False] * 25),
+                                                            *([True] * 194), *([False, *([True] * 22)] * 20)])
+
+    @property
+    def weights(self):
+        return super().weights + self.__input_normalizer__.weights + \
+               self.__weather_encoder__.weights + \
+               self.__market_encoder__.weights + self.__tariff_encoder__.weights + \
+               self.__observation_encoder__.weights + self.__state_encoder__.weights
+
+    @property
+    def num_inputs(self):
+        return self.__normalization_mask__.shape.as_list()[0]
+
+    def state_shape(self, batch_size):
+        return batch_size, self.__state_encoder__.num_units, 2
+
+    def build(self, input_shape: Union[list, tuple]):
+        super().build(input_shape)
+        k_init = init.orthogonal()
+
+        self.__weight_map__['initial_state'] = tf.Variable(tf.zeros(self.state_shape(1)))
+        self.__weight_map__['power_type_encoding'] = tf.Variable(k_init((14, self.__power_type_encoding_size__)))
+
+    def update_input_statistics(self, session, mean, var, count):
+        self.__input_normalizer__.update(session, mean, var, count)
+
+    def __call__(self, inputs: tf.Tensor, *args, **kwargs):
+        super().__call__(inputs, *args, **kwargs)
+
+        with tf.name_scope(type(self).__name__):
+            input_shape = inputs.shape.as_list()
+            state_in = kwargs['state_in']
+            state_mask = kwargs['state_mask']
+
+            p_state = tf.where(state_mask,
+                               tf.tile(self.__weight_map__['initial_state'], (tf.shape(inputs)[0], 1, 1)),
+                               state_in)
+
+            output = tf.reshape(inputs, (-1, input_shape[-1]))
+            output = self.__input_normalizer__(output, mask=self.__normalization_mask__)
+            output = tf.split(output, [7, 125, 168, 26, 460], axis=-1)
+            output[1] = self.__weather_encoder__(tf.transpose(tf.reshape(output[1], (-1, 25, 5)), (0, 2, 1)))
+            output[2] = self.__market_encoder__(tf.reshape(output[2], (-1, 7, 24)))
+            output[4] = self.__tariff_encoder__(self.__encode_power_type__(output[4]))
+            output = tf.concat(output, axis=-1)
+            output = self.__observation_encoder__(output)
+            output = tf.reshape(output, (input_shape[1], -1, output.shape.as_list()[-1]))
+            output, state_out = self.__state_encoder__(output,
+                                                       tuple(tf.unstack(tf.expand_dims(p_state, axis=0), axis=-1)))
+            output = tf.reshape(output, (-1, self.__state_encoder__.num_units))
+            state_out = tf.squeeze(tf.stack(state_out, axis=-1), axis=0)
+
+        return output, state_out
+
+    def __encode_power_type__(self, inputs):
+        encoding_size = self.__power_type_encoding_size__
+        expected_input_shape = (-1, 20, 23)
+        split_inputs = tf.split(tf.reshape(inputs, expected_input_shape), (1, expected_input_shape[-1] - 1), axis=-1)
+
+        power_type_encoding = tf.cast(tf.reshape(split_inputs[0], (-1,)), tf.int32)
+        power_type_encoding = tf.nn.embedding_lookup(self.__weight_map__['power_type_encoding'], power_type_encoding)
+        power_type_encoding = tf.reshape(power_type_encoding, expected_input_shape[:-1] + (encoding_size,))
+
+        outputs = tf.concat([power_type_encoding, split_inputs[-1]], axis=-1)
+        outputs = tf.transpose(outputs, (0, 2, 1))
+
+        return outputs
 
 
-class GaussianPolicy(Policy):
+class ActorNetwork(NetworkModule):
+    """StateNetwork is a neural network module that produces the actions of an agent given a state"""
 
-    def __init__(self, inputs, num_outputs, name="ContinuousPolicy"):
-        super().__init__(name)
-        self.NumOutputs = num_outputs
-        self.Mean = __build_dense__(inputs, num_outputs, name=name + "%s/mean" % name)
-        self.Std = tf.exp(tf.get_variable(name='%s/std' % name, shape=num_outputs, initializer=init.zeros(),
-                                          trainable=True))
-        self.Distribution = distributions.MultivariateNormalDiag(loc=self.Mean, scale_diag=self.Std)
-        self.__sample__ = self.Distribution.sample()
+    def __init__(self):
+        super().__init__()
+        self.__policy__ = GroupPolicy([ActorNetwork.__build_market_policy__(),
+                                       GroupPolicy([ActorNetwork.__build_tariff_policy__() for _ in range(5)])])
 
+    @staticmethod
+    def __build_market_policy__():
+        return GroupPolicy([BooleanPolicy(24), GaussianPolicy(48)])
+
+    @staticmethod
+    def __build_tariff_policy__():
+        return GroupPolicy([CategoricalPolicy(4), CategoricalPolicy(5), CategoricalPolicy(13), GaussianPolicy(6),
+                            BetaPolicy(6), GaussianPolicy(1), BetaPolicy(1), GaussianPolicy(4)])
+
+    @property
+    def weights(self):
+        return super().weights + self.__policy__.weights
+
+    @property
     def num_outputs(self):
-        return self.Mean.shape.dims[-1]
+        return self.__policy__.num_outputs
 
-    def mode(self):
-        return self.Mean
+    def build(self, input_shape: Union[list, tuple]):
+        super().build(input_shape)
 
-    def entropy(self):
-        return self.Distribution.entropy()
+        logit_count = self.__policy__.num_inputs + 1
+        k_init = init.variance_scaling()
+        b_init = init.zeros()
 
-    def log_prob(self, x):
-        return self.Distribution.log_prob(x)
+        self.__weight_map__['actor_kernel'] = tf.Variable(k_init((input_shape[-1], logit_count)))
+        self.__weight_map__['actor_bias'] = tf.Variable(b_init(logit_count))
 
-    def sample(self):
-        return self.__sample__
+    def __call__(self, inputs: tf.Tensor, *args, **kwargs):
+        super().__call__(inputs, *args, **kwargs)
 
+        with tf.name_scope(type(self).__name__):
+            logits = tf.nn.bias_add(tf.matmul(inputs, self.__weight_map__['actor_kernel']),
+                                    self.__weight_map__['actor_bias'])
 
-class BetaPolicy(Policy):
+            logit_split = tf.split(logits, [logits.shape.as_list()[1] - 1, 1], axis=1)
+            state_value = tf.squeeze(logit_split[1], axis=1)
+            policy = self.__policy__(logit_split[0])
 
-    def __init__(self, inputs, num_outputs, name="BetaPolicy"):
-        super().__init__(name)
-        concentrations = tf.exp(__build_dense__(inputs, num_outputs * 2, name=name + "%s/concentrations" % name)) + 1
-        c0, c1 = tf.split(concentrations, 2, axis=1)
-
-        self.NumOutputs = num_outputs
-        self.Concentration0 = c0
-        self.Concentration1 = c1
-        self.Distribution = distributions.Beta(c1, c0)
-        self.__sample__ = self.Distribution.sample()
-
-    def num_outputs(self):
-        return self.Concentration0.shape.dims[-1]
-
-    def mode(self):
-        return (self.Concentration1 - 1) / (self.Concentration0 + self.Concentration1 - 2)
-
-    def entropy(self):
-        return tf.reduce_sum(self.Distribution.entropy(), axis=1)
-
-    def log_prob(self, x):
-        return tf.reduce_sum(self.Distribution.log_prob(x), axis=1)
-
-    def sample(self):
-        return self.__sample__
+        return policy, state_value
 
 
-class RunningStatistics:
+class AgentModule(NetworkModule):
 
-    def __init__(self, num_features, epsilon=1e-8):
-        self.Epsilon = tf.convert_to_tensor(epsilon, dtype=tf.float64)
-        self.MeanInput = tf.placeholder(name="mean", shape=(1, num_features), dtype=tf.float64)
-        self.VarInput = tf.placeholder(name="variance", shape=(1, num_features), dtype=tf.float64)
-        self.CountInput = tf.placeholder(name="count", shape=(), dtype=tf.int64)
+    def __init__(self):
+        super().__init__()
+        self.state_network = StateNetwork()
+        self.actor_network = ActorNetwork()
 
-        with tf.variable_scope("RunningStatistics", reuse=tf.AUTO_REUSE):
-            self.Mean = tf.get_variable("mean", shape=(1, num_features), initializer=init.zeros(),
-                                        trainable=False, dtype=tf.float64)
-            self.Var = tf.get_variable("variance", shape=(1, num_features), initializer=init.ones(),
-                                       trainable=False, dtype=tf.float64)
-            self.Count = tf.get_variable("count", shape=(), initializer=init.zeros(),
-                                         trainable=False, dtype=tf.int64)
+    @property
+    def weights(self):
+        return self.state_network.weights + self.actor_network.weights
 
-        self.UpdateStatsOp = tf.cond(self.Count > 0, lambda: self.__update_stats__(), lambda: self.__reset_stats__())
+    def __call__(self, inputs: tf.Tensor, *args, **kwargs):
+        with tf.name_scope(type(self).__name__):
+            hidden_state, output_state = self.state_network(inputs, *args, **kwargs)
+            policy, state_value = self.actor_network(hidden_state, *args, **kwargs)
 
-    def __reset_stats__(self):
-        with tf.control_dependencies([tf.assign(self.Mean, self.MeanInput), tf.assign(self.Var, self.VarInput)]):
-            return tf.assign(self.Count, self.CountInput)
-
-    def __update_stats__(self):
-        count = self.CountInput + self.Count
-        count_input_f, count_f, new_count_f = (tf.cast(self.CountInput, tf.float64), tf.cast(self.Count, tf.float64),
-                                               tf.cast(count, tf.float64))
-
-        delta = self.MeanInput - self.Mean
-        mean = self.Mean + delta * count_input_f / new_count_f
-        m_a = self.Var * count_f
-        m_b = self.VarInput * count_input_f
-        m = m_a + m_b + tf.square(delta) * count_f * count_input_f / new_count_f
-        var = m / new_count_f
-
-        with tf.control_dependencies([tf.assign(self.Mean, mean), tf.assign(self.Var, var)]):
-            return tf.assign(self.Count, count)
-
-    def __call__(self, inputs, mask, *args, **kwargs):
-        normalized = tf.cast((tf.cast(inputs, tf.float64) - self.Mean) / tf.sqrt(self.Var + self.Epsilon), tf.float32)
-        return tf.transpose(tf.where(mask, tf.transpose(normalized), tf.transpose(inputs)))
-
-
-class Model:
-    NUM_ENABLED_TIMESLOT = 24
-    ACTION_COUNT = 177
-    FEATURE_COUNT = 1046
-    HIDDEN_STATE_COUNT = 1024
-    WEATHER_EMBEDDING_COUNT = 128
-    MARKET_EMBEDDING_COUNT = 128
-    TARIFF_TYPE_EMBEDDING_COUNT = 5
-    TARIFF_EMBEDDING_COUNT = 32
-    EMBEDDING_COUNT = 512
-    TARIFF_SLOTS_PER_ACTOR = 4
-    TARIFF_ACTORS = 5
-
-    def __init__(self, inputs, state_in, reset_state, name="Model"):
-        if isinstance(inputs, int):
-            inputs = tf.placeholder(shape=(1, inputs, Model.FEATURE_COUNT), dtype=tf.float32, name="InputPlaceholder")
-        elif not isinstance(inputs, tf.Tensor) or \
-                not (inputs.shape.ndims == 3 and inputs.shape.dims[-1] == Model.FEATURE_COUNT):
-            raise ValueError("Invalid parameter value for inputs")
-
-        with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
-            running_stats = RunningStatistics(Model.FEATURE_COUNT)
-
-            total_number_tariffs = Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS
-            inputs_shape = inputs.shape
-
-            mask = tf.convert_to_tensor([*([False] * 4), *([True] * 3),
-                                         *([True, True, True, False, False] * 25),
-                                         *([True] * 194), *([*([False] * 14), *([True] * 22)] * 20)])
-            normalized_inputs = tf.reshape(inputs, [-1, Model.FEATURE_COUNT])
-            normalized_inputs = running_stats(normalized_inputs, mask)
-            normalized_inputs = tf.split(normalized_inputs, [7, 120, 5, 168, 26,
-                                                             *([36] * total_number_tariffs)], axis=-1)
-
-            embedding = Model.__build_input_embedding__(normalized_inputs)
-            embedding = tf.reshape(embedding, [inputs_shape.dims[0], -1, embedding.shape.dims[-1]])
-            hidden_cell = rnn.CudnnLSTM(1, Model.HIDDEN_STATE_COUNT, kernel_initializer=init.orthogonal(),
-                                        bias_initializer=init.zeros(), name="%s/HState" % name)
-            initial_state_var = tf.get_variable(name="%s/IState" % name, shape=self.state_shapes(1),
-                                                initializer=init.zeros(), trainable=True)
-            reset_state = tf.reshape(reset_state, (-1, 1, 1))
-            state_in = tf.to_float(reset_state) * initial_state_var + (1 - tf.to_float(reset_state)) * state_in
-            unstacked_state_in = tf.expand_dims(state_in, axis=0)
-            unstacked_state_in = tuple(tf.unstack(unstacked_state_in, axis=2))
-
-            hidden_state, state_out = hidden_cell(embedding, unstacked_state_in)
-            hidden_state = tf.reshape(hidden_state, [-1, Model.HIDDEN_STATE_COUNT])
-
-            market_policies = Model.__build_market_policies__(hidden_state)
-            tariff_policies = Model.__build_tariff_policies__(hidden_state)
-
-            self.Name = name
-            self.Inputs = inputs
-            self.Embedding = embedding
-            self.RunningStats = running_stats
-            self.StateOut = tf.squeeze(tf.stack(state_out, 2), axis=0)
-            self.InitialState = tf.ones_like(state_in, dtype=tf.float32) * initial_state_var
-            self.Policies = GroupedPolicy([market_policies, tariff_policies], name="Policy")
-            self.StateValue = __build_dense__(hidden_state, 1, name="StateValue")
-            self.EvaluationOp = self.Policies.sample()
-            self.PredictOp = self.Policies.mode()
-
-    @ property
-    def variables(self):
-        return tf.trainable_variables(self.Name)
-
-    @staticmethod
-    def __build_input_embedding__(normalized_inputs):
-        current_weather = tf.transpose(tf.reshape(normalized_inputs[2], (-1, 1, 5)), (0, 2, 1))
-        forecast_embedding = tf.transpose(tf.reshape(normalized_inputs[1], (-1, 24, 5)), (0, 2, 1))
-        weather_embedding = tf.concat([current_weather, forecast_embedding], axis=2)
-        weather_embedding = __build_conv_embedding__(weather_embedding,
-                                                     Model.WEATHER_EMBEDDING_COUNT,
-                                                     activation=tf.nn.relu,
-                                                     initializer=init.orthogonal(np.sqrt(2)),
-                                                     bias_initializer=init.zeros(),
-                                                     group_norm_count=8,
-                                                     name="WeatherEmbedding")
-
-        market_embedding = tf.reshape(normalized_inputs[3], (-1, 7, 24))
-        market_embedding = __build_conv_embedding__(market_embedding,
-                                                    Model.MARKET_EMBEDDING_COUNT,
-                                                    activation=tf.nn.relu,
-                                                    initializer=init.orthogonal(np.sqrt(2)),
-                                                    bias_initializer=init.zeros(),
-                                                    group_norm_count=8,
-                                                    name="MarketEmbedding")
-
-        tariff_embeddings = []
-        for idx in range(Model.TARIFF_SLOTS_PER_ACTOR * Model.TARIFF_ACTORS):
-            tariff_embedding = normalized_inputs[-(idx + 1)]
-            tariff_embedding = tf.split(tariff_embedding, [14, 22], axis=-1)
-            tariff_embedding[0] = __build_dense__(tariff_embedding[0], Model.TARIFF_TYPE_EMBEDDING_COUNT,
-                                                  name="TariffTypeEmbedding")
-            tariff_embeddings.append(__build_embedding__(tf.concat(tariff_embedding, axis=-1),
-                                                         Model.TARIFF_EMBEDDING_COUNT,
-                                                         activation=tf.nn.relu,
-                                                         initializer=init.orthogonal(np.sqrt(2)),
-                                                         group_norm_count=4,
-                                                         name="TariffEmbedding"))
-
-        tariff_embeddings = tf.concat(tariff_embeddings, axis=-1)
-        embedding = tf.concat([normalized_inputs[0], normalized_inputs[4],
-                               weather_embedding,
-                               market_embedding,
-                               tariff_embeddings], axis=-1)
-
-        embedding = __build_embedding__(embedding,
-                                        Model.EMBEDDING_COUNT,
-                                        activation=tf.nn.relu,
-                                        initializer=init.orthogonal(np.sqrt(2)),
-                                        group_norm_count=32,
-                                        name="Embedding")
-
-        return embedding
-
-    @staticmethod
-    def __build_market_policies__(state):
-        market_actions = GroupedPolicy([BooleanPolicy(state, name="MarketAction")
-                                        for _ in range(Model.NUM_ENABLED_TIMESLOT)])
-        market_prices = GaussianPolicy(state, Model.NUM_ENABLED_TIMESLOT, name="MarketPrice")
-        market_quantities = GaussianPolicy(state, Model.NUM_ENABLED_TIMESLOT, name="MarketQuantity")
-        market_policies = GroupedPolicy([market_actions, market_prices, market_quantities], name="MarketPolicy")
-
-        return market_policies
-
-    @staticmethod
-    def __build_tariff_policies__(state):
-        tariff_policies = []
-        for idx in range(1, Model.TARIFF_ACTORS + 1):
-            t_number = CategoricalPolicy(state, Model.TARIFF_SLOTS_PER_ACTOR, name="TariffNumber_%d" % idx)
-            t_action = CategoricalPolicy(state, 5, name="TariffAction_%d" % idx)
-            p_type = CategoricalPolicy(state, 13, name="PowerType_%d" % idx)
-
-            v_f = GaussianPolicy(state, 6, name="VF_%d" % idx)
-            v_c = BetaPolicy(state, 6, name="VC_%d" % idx)
-            f_f = GaussianPolicy(state, 1, name="FF_%d" % idx)
-            f_c = BetaPolicy(state, 1, name="FC_%d" % idx)
-            reg = GaussianPolicy(state, 2, name="REG_%d" % idx)
-            pp = GaussianPolicy(state, 1, name="PP_%d" % idx)
-            ewp = GaussianPolicy(state, 1, name="EWP_%d" % idx)
-
-            tariff_policies.append(GroupedPolicy([t_number, t_action, p_type, v_f, v_c, f_f, f_c, reg, pp, ewp],
-                                                 name="TariffPolicy_%d" % idx))
-        tariff_policies = GroupedPolicy(tariff_policies, name="TariffPolicies")
-
-        return tariff_policies
-
-    @staticmethod
-    def create_transfer_op(srcmodel, dstmodel):
-        srcvars = tf.trainable_variables(srcmodel.Name)
-        dstvars = tf.trainable_variables(dstmodel.Name)
-
-        return tuple(tf.assign(dstvars[idx], srcvars[idx]) for idx in range(len(srcvars)))
-
-    @staticmethod
-    def state_shapes(batch_size):
-        return [batch_size, 2, Model.HIDDEN_STATE_COUNT]
+        return policy, state_value, output_state

@@ -1,8 +1,7 @@
 import server
 import struct
-import numpy
+import numpy as np
 import tensorflow as tf
-import tensorflow.initializers as init
 import subprocess
 import utility
 import threading
@@ -10,13 +9,10 @@ import queue
 import os
 import logging
 from enum import Enum
+from typing import Union, Callable
 from functools import reduce
-
-
-def __build_internal_state__(scope_name, state_shape):
-    with tf.variable_scope(scope_name, reuse=tf.AUTO_REUSE):
-        return tf.get_variable("state", shape=state_shape,
-                               dtype=tf.float32, initializer=init.zeros(), trainable=False)
+from model import AgentModule
+from tensorflow import initializers as init
 
 
 class Directory:
@@ -34,16 +30,16 @@ class ResourceStatus(Enum):
 class BootstrapManager:
 
     def __init__(self, max_parallelism=1):
-        self.IsActive = True
-        self.ResourceMap = {}
-        self.StatusMap = {}
-        self.Queue = queue.Queue()
-        self.Workers = [threading.Thread(target=self.serve) for _ in range(max_parallelism)]
-        utility.apply(lambda worker: worker.start(), self.Workers)
+        self.is_active = True
+        self.resource_map = {}
+        self.status_map = {}
+        self.command_queue = queue.Queue()
+        self.workers = [threading.Thread(target=self.serve) for _ in range(max_parallelism)]
+        utility.apply(lambda worker: worker.start(), self.workers)
 
     def serve(self):
-        while self.IsActive:
-            identifier = self.Queue.get()
+        while self.is_active:
+            identifier = self.command_queue.get()
             returncode = subprocess.call([*PowerTACGameHook.INTERPRETER_COMMAND,
                                           os.path.relpath(os.path.join(Directory.EXECUTABLE_DIR,
                                                                        "server.jar"),
@@ -56,21 +52,21 @@ class BootstrapManager:
                                          stderr=subprocess.DEVNULL)
 
             if returncode == 0:
-                self.StatusMap[identifier] = ResourceStatus.Ready
-                self.ResourceMap[identifier].put(1)
+                self.status_map[identifier] = ResourceStatus.Ready
+                self.resource_map[identifier].put(1)
             else:
-                self.Queue.put(identifier)
+                self.command_queue.put(identifier)
 
     def start_bootstrap(self, identifier):
-        if identifier not in self.StatusMap or self.StatusMap[identifier] == ResourceStatus.Idle:
-            if identifier not in self.ResourceMap:
-                self.ResourceMap[identifier] = queue.Queue(1)
-            self.StatusMap[identifier] = ResourceStatus.Wait
-            self.Queue.put(identifier)
+        if identifier not in self.status_map or self.status_map[identifier] == ResourceStatus.Idle:
+            if identifier not in self.resource_map:
+                self.resource_map[identifier] = queue.Queue(1)
+            self.status_map[identifier] = ResourceStatus.Wait
+            self.command_queue.put(identifier)
 
     def obtain_bootstrap(self, identifier):
         self.start_bootstrap(identifier)
-        self.ResourceMap[identifier].get()
+        self.resource_map[identifier].get()
 
         scratch_bootstrap_file = os.path.join(Directory.SCRATCH_BOOTSTRAP_DIR, identifier)
         bootstrap_file = os.path.join(Directory.BOOTSTRAP_DIR, identifier)
@@ -79,41 +75,40 @@ class BootstrapManager:
             os.remove(bootstrap_file)
 
         os.rename(scratch_bootstrap_file, bootstrap_file)
-        self.StatusMap[identifier] = ResourceStatus.Idle
+        self.status_map[identifier] = ResourceStatus.Idle
 
         return bootstrap_file
 
     def kill(self):
-        self.IsActive = False
-        utility.apply(lambda worker: worker.join(), self.Workers)
+        self.is_active = False
+        utility.apply(lambda worker: worker.join(), self.workers)
 
 
 class AgentServerHook(server.ServerHook):
 
-    def __init__(self, model_builder_fn, num_clients: int, name="AgentServerHook"):
-        internal_state = __build_internal_state__(name, model_builder_fn.state_shapes(num_clients))
-        reset_state = tf.placeholder(tf.bool, shape=())
-        model = model_builder_fn(num_clients, internal_state, reset_state)
-        observation_struct = struct.Struct(">%df" % (model.Inputs.shape.dims[-1] + 1))
-        output_struct = struct.Struct(">%df" % model.EvaluationOp.shape.dims[-1])
-
-        with tf.control_dependencies([tf.assign(internal_state, model.StateOut)]):
-            step_op = tf.identity(model.EvaluationOp)
-
-        self.Name = name
-        self.ClientCount = num_clients
-        self.Model = model
-        self.StepOp = step_op
-        self.ResetState = reset_state
-        self.__observation_struct__ = observation_struct
-        self.__output_struct__ = output_struct
+    def __init__(self, model: AgentModule, num_clients: int, name="AgentServerHook"):
         self.__reset__ = True
+        self.name = name
+        self.model = model
+        self.num_clients = num_clients
+        self.reset_state_p = tf.placeholder(tf.bool, shape=(1,))
+        self.observations_p = tf.placeholder(tf.float32, shape=(num_clients, 1, model.state_network.num_inputs))
+        self.internal_state_v = tf.Variable(init.zeros()(model.state_network.state_shape(num_clients)), trainable=False)
 
-    def get_observation_structure(self):
-        return self.__observation_struct__
+        policy, state_value, output_state = model(self.observations_p, state_in=self.internal_state_v,
+                                                  state_mask=tf.tile(self.reset_state_p, (num_clients,)))
+        self.policy = policy
+        with tf.control_dependencies([tf.assign(self.internal_state_v, output_state)]):
+            self.state_value = tf.identity(state_value)
+            self.sample_op = policy.sample()
+            
+    @property
+    def observation_structure(self):
+        return struct.Struct(">%df" % (self.model.state_network.num_inputs + 1))
 
-    def get_output_structure(self):
-        return self.__output_struct__
+    @property
+    def output_structure(self):
+        return struct.Struct(">%df" % self.model.actor_network.num_outputs)
 
     def setup(self, **kwargs):
         pass
@@ -121,9 +116,15 @@ class AgentServerHook(server.ServerHook):
     def on_start(self, session, **kwargs):
         self.__reset__ = True
 
-    def on_step(self, observations, session, **kwargs):
-        result = session.run(self.StepOp, feed_dict={self.Model.Inputs: numpy.array([observations])[:, :, 1:],
-                                                     self.ResetState: self.__reset__})
+    def on_step(self, observations, **kwargs):
+        session = kwargs['session']
+        extra_ops = kwargs['extra_ops'] if 'extra_ops' in kwargs else []
+        extra_feed_dict = kwargs['extra_feed_dict'] if 'extra_feed_dict' in kwargs else {}
+
+        result = session.run([self.sample_op, self.state_value] + extra_ops,
+                             feed_dict={self.observations_p: np.expand_dims(np.array(observations), axis=1)[:, :, 1:],
+                                        self.reset_state_p: np.array((self.__reset__,)),
+                                        **extra_feed_dict})
         self.__reset__ = False
 
         return result
@@ -138,200 +139,179 @@ class AgentServerHook(server.ServerHook):
 class PowerTACGameHook(AgentServerHook):
     INTERPRETER_COMMAND = ["java", "-jar"]
 
-    def __init__(self, model_builder_fn, num_clients: int, powertac_port: int,
+    def __init__(self, model: AgentModule, num_clients: int, powertac_port: int,
                  cpu_semaphore: threading.BoundedSemaphore,
                  bootstrap_manager: BootstrapManager, name="AgentServerHook"):
-        super().__init__(model_builder_fn, num_clients, name)
-        self.PowerTACPort = powertac_port
-        self.CPUSemaphore = cpu_semaphore
-        self.BootstrapManager = bootstrap_manager
-        self.SemaphoreAcquired = False
-        self.ServerProcess = None
-        self.BootstrapProcess = None
-        self.ClientProcesses = [None] * num_clients
+        super().__init__(model, num_clients, name)
+        self.powertac_port = powertac_port
+        self.semaphore = cpu_semaphore
+        self.bootstrap_manager = bootstrap_manager
+        self.is_semaphore_acquired = False
+        self.server_process = None
+        self.client_processes = {}
 
     def setup(self, server_instance, **kwargs):
-        broker_identities = ",".join("Extreme%d" % idx for idx in range(self.ClientCount))
-        bootstrap_file = self.BootstrapManager.obtain_bootstrap(self.Name)
+        broker_identities = ",".join("Extreme%d" % idx for idx in range(self.num_clients))
+        bootstrap_file = self.bootstrap_manager.obtain_bootstrap(self.name)
 
-        self.CPUSemaphore.acquire()
-        logging.info("Starting %s setup" % self.Name)
-        self.ServerProcess = subprocess.Popen([*PowerTACGameHook.INTERPRETER_COMMAND,
-                                               "server.jar",
-                                               "--sim",
-                                               "--jms-url",
-                                               "tcp://localhost:%d" % self.PowerTACPort,
-                                               "--boot-data",
-                                               os.path.relpath(bootstrap_file, Directory.EXECUTABLE_DIR),
-                                               "--brokers",
-                                               broker_identities],
-                                              cwd=Directory.EXECUTABLE_DIR,
-                                              stdin=subprocess.DEVNULL,
-                                              stdout=subprocess.DEVNULL,
-                                              stderr=subprocess.DEVNULL)
+        self.semaphore.acquire()
+        logging.info("Starting %s setup" % self.name)
+        self.server_process = subprocess.Popen([*PowerTACGameHook.INTERPRETER_COMMAND,
+                                                "server.jar",
+                                                "--sim",
+                                                "--jms-url",
+                                                "tcp://localhost:%d" % self.powertac_port,
+                                                "--boot-data",
+                                                os.path.relpath(bootstrap_file, Directory.EXECUTABLE_DIR),
+                                                "--brokers",
+                                                broker_identities],
+                                               cwd=Directory.EXECUTABLE_DIR,
+                                               stdin=subprocess.DEVNULL,
+                                               stdout=subprocess.DEVNULL,
+                                               stderr=subprocess.DEVNULL)
 
-        for index in range(self.ClientCount):
-            self.ClientProcesses[index] = subprocess.Popen([*PowerTACGameHook.INTERPRETER_COMMAND,
-                                                            "broker.jar",
-                                                            "--jms-url",
-                                                            "tcp://localhost:%d" % self.PowerTACPort,
-                                                            "--port",
-                                                            str(server_instance.Port),
-                                                            "--config",
-                                                            "config/broker%d.properties" % index],
-                                                           cwd=Directory.EXECUTABLE_DIR,
-                                                           stdin=subprocess.DEVNULL,
-                                                           stdout=subprocess.DEVNULL,
-                                                           stderr=subprocess.DEVNULL)
+        for index in range(self.num_clients):
+            self.client_processes[index] = subprocess.Popen([*PowerTACGameHook.INTERPRETER_COMMAND,
+                                                             "broker.jar",
+                                                             "--jms-url",
+                                                             "tcp://localhost:%d" % self.powertac_port,
+                                                             "--port",
+                                                             str(server_instance.port),
+                                                             "--config",
+                                                             "config/broker%d.properties" % index],
+                                                            cwd=Directory.EXECUTABLE_DIR,
+                                                            stdin=subprocess.DEVNULL,
+                                                            stdout=subprocess.DEVNULL,
+                                                            stderr=subprocess.DEVNULL)
 
-        self.BootstrapManager.start_bootstrap(self.Name)
-        self.SemaphoreAcquired = True
+        self.bootstrap_manager.start_bootstrap(self.name)
+        self.is_semaphore_acquired = True
 
     def on_start(self, **kwargs):
         super().on_start(**kwargs)
         self.__try_release_semaphore__()
 
-    def on_step(self, observations, session, **kwargs):
-        return super().on_step(observations, session, **kwargs)
-
     def on_stop(self, session, **kwargs):
         self.__try_release_semaphore__()
-        self.ServerProcess.terminate()
-        utility.apply(lambda client: client.terminate(), self.ClientProcesses)
+        self.server_process.terminate()
+        utility.apply(lambda client: client.terminate(), self.client_processes.values())
 
     def __try_release_semaphore__(self):
-        if self.SemaphoreAcquired:
-            self.CPUSemaphore.release()
-            self.SemaphoreAcquired = False
-            logging.info("%s: Semaphore released" % self.Name)
+        if self.is_semaphore_acquired:
+            self.semaphore.release()
+            self.is_semaphore_acquired = False
+            logging.info("%s: Semaphore released" % self.name)
 
 
 class PowerTACRolloutHook(PowerTACGameHook):
 
-    def __init__(self, model_builder_fn, num_clients: int, powertac_port: int,
+    def __init__(self, model: AgentModule, num_clients: int, powertac_port: int,
                  cpu_semaphore: threading.BoundedSemaphore,
                  bootstrap_manager: BootstrapManager,
-                 nsteps: int, nbatches: int, recv_queue: queue.Queue,
-                 alternate_model_name, alternate_policy_prob, gamma_op, lambda_val,
+                 nsteps: int, gamma: Union[Callable[[], float], float], lam: Union[Callable[[], float], float],
+                 alt_model: AgentModule,
                  name="PowerTACRolloutHook"):
-        super().__init__(model_builder_fn, num_clients, powertac_port, cpu_semaphore, bootstrap_manager, name)
+        super().__init__(model, num_clients, powertac_port, cpu_semaphore, bootstrap_manager, name)
 
-        internal_state = __build_internal_state__(name + 'Alt', model_builder_fn.state_shapes(1))
-        model = model_builder_fn(self.Model.Inputs[:, -1:, :], internal_state, self.ResetState,
-                                 name=alternate_model_name)
+        self.nsteps = nsteps
+        self.rollout_queue = None
+        self.gamma = gamma
+        self.lam = lam
+        self.alt_model = alt_model
+        self.alt_internal_state_v = tf.Variable(init.zeros()(self.model.state_network.state_shape(1)),
+                                                trainable=False)
+        policy, state_value, output_state = alt_model(self.observations_p[-1:, :, :],
+                                                      state_in=self.alt_internal_state_v,
+                                                      state_mask=self.reset_state_p)
+        with tf.control_dependencies([tf.assign(self.alt_internal_state_v, output_state)]):
+            self.state_value = tf.concat([self.state_value[:-1], state_value], axis=0)
+            self.sample_op = tf.concat([self.sample_op[:-1, :], policy.sample()], axis=0)
 
-        with tf.control_dependencies([tf.assign(internal_state, model.StateOut)]):
-            alternate_policy_prob = alternate_policy_prob / (1.0 / num_clients)
-            step_op = tf.cond(tf.random_uniform(shape=()) < alternate_policy_prob,
-                              lambda: tf.concat([self.StepOp[:-1, :], model.EvaluationOp], axis=0),
-                              lambda: self.StepOp)
-
-        self.ModelVersion = nbatches
-        self.ExpectedModelVersion = 0
-        self.NSteps = nsteps
-        self.NBatches = nbatches
-        self.RecvQueue = recv_queue
-        self.Lambda = lambda_val
-        self.__rollout_states__ = None
-        self.__reset_rollouts__ = numpy.zeros(shape=nsteps, dtype=numpy.bool)
-        self.__observation_rollouts__ = numpy.zeros(shape=(nsteps, num_clients,
-                                                           self.Model.Inputs.shape.dims[-1] + 1),
-                                                    dtype=numpy.float32)
-        self.__action_rollouts__ = numpy.zeros(shape=(nsteps,
-                                                      num_clients,
-                                                      self.Model.EvaluationOp.shape.dims[-1]),
-                                               dtype=numpy.float32)
-        self.__reward_rollouts__ = numpy.zeros(shape=(nsteps, num_clients), dtype=numpy.float32)
-        self.__value_rollouts__ = numpy.zeros(shape=(nsteps, num_clients), dtype=numpy.float32)
-        self.__log_prob_rollouts__ = numpy.zeros(shape=(nsteps, num_clients), dtype=numpy.float32)
+        self.__states__ = None
+        self.__reset_rollouts__ = np.zeros(shape=self.nsteps, dtype=np.bool)
+        self.__observation_rollouts__ = np.zeros(shape=(self.num_clients, self.nsteps,
+                                                        self.model.state_network.num_inputs + 1),
+                                                 dtype=np.float32)
+        self.__action_rollouts__ = np.zeros(shape=(self.num_clients, self.nsteps, self.model.actor_network.num_outputs),
+                                            dtype=np.float32)
+        self.__reward_rollouts__ = np.zeros(shape=(self.num_clients, self.nsteps), dtype=np.float32)
+        self.__value_rollouts__ = np.zeros(shape=(self.num_clients, self.nsteps), dtype=np.float32)
         self.__rollout_index__ = 0
 
-        self.StepOp = [step_op,
-                       tf.squeeze(self.Model.StateValue, axis=-1),
-                       self.Model.Policies.log_prob(self.StepOp),
-                       gamma_op]
-        self.AlternateModel = model
+    @staticmethod
+    def __evaluate_value__(value: Union[Callable[[], float], float]):
+        if callable(value):
+            return value()
+        else:
+            return value
 
     def __calculate_reward__(self, cash):
-        p_array = numpy.zeros(shape=(1, self.ClientCount), dtype=numpy.float32)
-        sorted_indices = numpy.argsort(cash, axis=1)
+        p_array = np.zeros(shape=(self.num_clients, 1), dtype=np.float32)
+        sorted_indices = np.argsort(cash, axis=0)
         last_idx = 0
 
-        for idx in range(self.ClientCount):
-            current_cash = cash[0, sorted_indices[0, idx]]
-            if idx == self.ClientCount - 1 or cash[0, sorted_indices[0, idx + 1]] > current_cash:
+        for idx in range(self.num_clients):
+            current_cash = cash[sorted_indices[idx, 0], 0]
+            if idx == self.num_clients - 1 or cash[sorted_indices[idx + 1, 0], 0] > current_cash:
                 nidx = idx + 1
                 p_value = reduce(lambda a, b: a + b, range(last_idx, nidx)) / (nidx - last_idx)
                 for idx_internal in range(last_idx, nidx):
-                    p_array[0, sorted_indices[0, idx_internal]] = p_value
+                    p_array[sorted_indices[idx_internal, 0], 0] = p_value
                 last_idx = nidx
-        p_mean = reduce(lambda a, b: a + b, range(self.ClientCount)) / self.ClientCount
-        p_variance = reduce(lambda a, b: a + b, map(lambda x: (x - p_mean) ** 2, range(self.ClientCount)))
+        p_mean = reduce(lambda a, b: a + b, range(self.num_clients)) / self.num_clients
+        p_variance = reduce(lambda a, b: a + b, map(lambda x: (x - p_mean) ** 2, range(self.num_clients)))
 
-        return (p_array - p_mean) / numpy.sqrt(p_variance)
+        return (p_array - p_mean) / np.sqrt(p_variance)
 
     def on_start(self, session, **kwargs):
         super().on_start(session=session, **kwargs)
         self.__rollout_index__ = 0
 
-    def on_step(self, observations, session, **kwargs):
-        if self.ExpectedModelVersion < self.ModelVersion:
-            actions = self.__handle_rollout_step__(observations, session, **kwargs)
-        else:
-            actions, _, _, _ = super().on_step(observations, session, **kwargs)
-
-        return actions
-
-    def update(self):
-        self.ModelVersion = self.ModelVersion + self.NBatches
-
-    def on_reset(self):
-        self.ModelVersion = self.NBatches
-        self.ExpectedModelVersion = 0
-
-    def __handle_rollout_step__(self, observations, session, **kwargs):
-        rollout_idx = self.__rollout_index__ % self.NSteps
+    def on_step(self, observations, **kwargs):
+        rollout_idx = self.__rollout_index__ % self.nsteps
         rollout_nidx = rollout_idx + 1
-        rollout_pidx = self.NSteps - 1 if rollout_idx == 0 else rollout_idx - 1
+        rollout_pidx = self.nsteps - 1 if rollout_idx == 0 else rollout_idx - 1
 
         if rollout_idx == 0:
-            self.__rollout_states__ = session.run(self.Model.InitialState)
+            self.__states__ = kwargs['session'].run(self.internal_state_v)
 
         self.__reset_rollouts__[rollout_idx] = self.__reset__
-        actions, value, log_prob, gamma = super().on_step(observations, session, **kwargs)
+        actions, state_values = super().on_step(observations, **kwargs)
 
-        observations = numpy.array([observations])
-        value = numpy.array([value])
+        state_values = np.expand_dims(state_values, axis=1)
+        observations = np.expand_dims(np.array(observations), axis=1)
+        self.__reward_rollouts__[:, rollout_pidx: rollout_pidx + 1] = self.__calculate_reward__(observations[:, :, 0])
+        if self.__rollout_index__ > 0 and rollout_idx == 0 and self.rollout_queue is not None:
+            nvalues = np.concatenate([self.__value_rollouts__[:, 1:], state_values], axis=1)
 
-        self.__reward_rollouts__[rollout_pidx: rollout_pidx + 1, :] = self.__calculate_reward__(observations[:, :, 0])
-        if self.__rollout_index__ > 0 and rollout_idx == 0:
-            logging.info("%s submitting rollout for model update %d" % (self.Name, self.ExpectedModelVersion))
-            nvalues = numpy.concatenate([self.__value_rollouts__[1:, :], value], axis=0)
+            gamma = PowerTACRolloutHook.__evaluate_value__(self.gamma)
+            lam = PowerTACRolloutHook.__evaluate_value__(self.lam)
 
             advantage = self.__reward_rollouts__ + gamma * nvalues - self.__value_rollouts__
-            gae_factor = gamma * self.Lambda
-            advantage[-2:-1, :] = advantage[-2:-1, :] + gae_factor * advantage[-1:, :]
-            for idx in range(advantage.shape[0] - 2):
-                gae = gae_factor * advantage[-idx - 2:-idx - 1, :]
-                advantage[-idx - 3:-idx - 2, :] = advantage[-idx - 3:-idx - 2, :] + gae
+            gae_factor = gamma * lam
+            advantage[:, -2:-1] = advantage[:, -2:-1] + gae_factor * advantage[:, -1:]
+            for idx in range(advantage.shape[1] - 2):
+                gae = gae_factor * advantage[:, -idx - 2:-idx - 1]
+                advantage[:, -idx - 3:-idx - 2] = advantage[:, -idx - 3:-idx - 2] + gae
 
             reward = advantage + self.__value_rollouts__
 
-            for idx in range(self.ClientCount - 1):
-                self.RecvQueue.put((self.__reset_rollouts__[idx],
-                                    self.__rollout_states__[idx: idx + 1, :, :],
-                                    self.__observation_rollouts__[:, idx: idx + 1, :],
-                                    self.__action_rollouts__[:, idx: idx + 1, :],
-                                    self.__log_prob_rollouts__[:, idx: idx + 1],
-                                    advantage[:, idx: idx + 1],
-                                    reward[:, idx: idx + 1],
-                                    self.__value_rollouts__[:, idx: idx + 1]))
-            self.ExpectedModelVersion = self.ExpectedModelVersion + 1
+            for idx in range(self.num_clients - 1):
+                self.rollout_queue.put((self.name,
+                                        self.__reset_rollouts__[idx],
+                                        self.__states__[idx: idx + 1, :, :],
+                                        self.__observation_rollouts__[idx: idx + 1, :, :],
+                                        self.__action_rollouts__[idx: idx + 1, :, :],
+                                        advantage[idx: idx + 1, :],
+                                        reward[idx: idx + 1, :],))
 
-        self.__observation_rollouts__[rollout_idx: rollout_nidx, :, :] = observations[:, :, :]
-        self.__action_rollouts__[rollout_idx: rollout_nidx, :, :] = numpy.array([actions])
-        self.__log_prob_rollouts__[rollout_idx: rollout_nidx, :] = log_prob
-        self.__value_rollouts__[rollout_idx: rollout_nidx, :] = value
+        self.__observation_rollouts__[:, rollout_idx: rollout_nidx, :] = observations
+        self.__action_rollouts__[:, rollout_idx: rollout_nidx, :] = np.expand_dims(actions, axis=1)
+        self.__value_rollouts__[:, rollout_idx: rollout_nidx] = state_values
         self.__rollout_index__ = self.__rollout_index__ + 1
 
         return actions
+
+    def update_queue(self, rollout_queue: queue.Queue):
+        self.rollout_queue = rollout_queue
+        self.__rollout_index__ = 0

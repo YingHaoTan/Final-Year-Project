@@ -65,31 +65,13 @@ public class TariffInfo implements ISerialize {
 
 	@Override
 	public int getSizeInBytes() {
-		return 144;
+		return 92;
 	}
 
 	@Override
 	public void serialize(ByteBuffer buffer) {
-		for(int i = 0; i < TariffConstants.POWER_TYPE_LIST.size() + 1; i++) {
-			if(spec == null) {
-				if(i == 0)
-					buffer.putFloat(1f);
-				else
-					buffer.putFloat(0f);
-			}
-			else {
-				if(i == TariffConstants.POWER_TYPE_LIST.indexOf(spec.getPowerType()) + 1)
-					buffer.putFloat(1f);
-				else
-					buffer.putFloat(0f);
-			}
-		}
-		
 		if(spec != null) {
-			int subscribers = getSubscribers();
-			if(subscribers < 0)
-				throw new RuntimeException("WTF 0?");
-			
+			buffer.putFloat(TariffConstants.POWER_TYPE_LIST.indexOf(spec.getPowerType()) + 1);
 			buffer.putFloat(getSubscribers());
 			buffer.putFloat(getPowerUsagePerCustomer());
 			for(int i = 0; i < TariffConstants.TIME_OF_USE_SLOTS; i++)
@@ -112,6 +94,7 @@ public class TariffInfo implements ISerialize {
 			buffer.putFloat((float) spec.getEarlyWithdrawPayment());
 		}
 		else {
+			buffer.putFloat(0f);
 			buffer.putFloat(0f);
 			buffer.putFloat(0f);
 			for(int i = 0; i < TariffConstants.TIME_OF_USE_SLOTS; i++)
