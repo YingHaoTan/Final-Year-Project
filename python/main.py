@@ -10,6 +10,7 @@ import logging
 import tqdm
 import colorama
 from model import AgentModule
+from model import InputNormalizer
 
 tf.logging.set_verbosity(tf.logging.ERROR)
 
@@ -23,11 +24,11 @@ PT_PORT = 50000
 ROLLOUT_STEPS = 168
 BUFFER_SIZE = 648
 NUM_MINIBATCH = 18
-NUM_EPOCHS = 8
+NUM_EPOCHS = 16
 MAX_EPOCHS = 5000 * NUM_EPOCHS
 WARMUP_PHASE = 1 * NUM_EPOCHS
 MAX_PHASE = 500 * NUM_EPOCHS
-LEARNING_RATE = 2e-4
+LEARNING_RATE = 0.00025
 
 colorama.init()
 
@@ -51,6 +52,11 @@ logging.basicConfig(filename="main.log", level=logging.INFO,
                     format="%(asctime)s - %(threadName)s - %(levelname)s - %(message)s")
 
 # Model declaration
+input_normalizer = InputNormalizer(mask=tf.convert_to_tensor([*([False] * 4),
+                                                              *([True] * 3),
+                                                              *([True, True, True, False, False] * 25),
+                                                              *([True] * 194),
+                                                              *([False, *([True] * 22)] * 20)]))
 model = AgentModule()
 base_model = AgentModule()
 
@@ -59,7 +65,7 @@ cash_buffer = np.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=np.float32)
 reset_buffer = np.zeros(shape=(BUFFER_SIZE,), dtype=np.bool)
 states_buffer = np.zeros(shape=model.state_network.state_shape(BUFFER_SIZE), dtype=np.float32)
 observation_buffer = np.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS,
-                                     model.state_network.num_inputs),
+                                     input_normalizer.num_inputs),
                               dtype=np.float32)
 action_buffer = np.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS, model.actor_network.num_outputs),
                          dtype=np.float32)
@@ -89,6 +95,7 @@ dataset = dataset.batch(batch_size)
 dataset = dataset.repeat(NUM_EPOCHS)
 d_iterator = dataset.make_initializable_iterator()
 d_reset, d_state, d_obs, d_action, d_adv, d_reward = d_iterator.get_next()
+d_obs = tf.reshape(input_normalizer(tf.reshape(d_obs, (-1, input_normalizer.num_inputs))), tf.shape(d_obs))
 d_action = tf.reshape(d_action, (-1, model.actor_network.num_outputs))
 d_adv = tf.reshape(d_adv, (-1, 1))
 d_reward = tf.reshape(d_reward, (-1, 1))
@@ -99,8 +106,7 @@ base_policy, base_state_value, _ = base_model(d_obs, state_in=d_state, state_mas
 prob_ratio = tf.exp(policy.log_prob(d_action) - base_policy.log_prob(d_action))
 clipped_prob_ratio = tf.clip_by_value(prob_ratio, 1 - PPO_EPSILON, 1 + PPO_EPSILON)
 policy_loss = -tf.reduce_mean(tf.minimum(prob_ratio * d_adv, clipped_prob_ratio * d_adv))
-clipped_value = base_state_value + tf.clip_by_value(state_value - base_state_value, -PPO_EPSILON, PPO_EPSILON)
-value_loss = 0.5 * tf.reduce_mean(tf.maximum((d_reward - clipped_value)**2, (d_reward - state_value)**2))
+value_loss = tf.reduce_mean(tf.square(d_reward - state_value))
 entropy_loss = 0.01 * tf.reduce_mean(policy.entropy())
 loss = policy_loss + value_loss - entropy_loss
 
@@ -142,13 +148,14 @@ summary_writer = tf.summary.FileWriter(SUMMARY_DIR, graph=tf.get_default_graph()
 # Server declaration
 bootstrap_manager = core.BootstrapManager(BOOTSTRAP_PARALLELISM)
 servers = [server.Server(NUM_CLIENTS[idx], PORT + idx,
-                         core.PowerTACRolloutHook(model, NUM_CLIENTS[idx], PT_PORT + idx,
+                         core.PowerTACRolloutHook(input_normalizer, model, NUM_CLIENTS[idx], PT_PORT + idx,
                                                   CPU_SEMAPHORE, bootstrap_manager, ROLLOUT_STEPS,
                                                   GAMMA, LAMBDA, base_model, name="Game%02d" % idx))
            for idx in range(len(NUM_CLIENTS))]
 
 # Training session region
 variable_list = [global_step, cash_variable, stats_ready_variable] + \
+                input_normalizer.weights + \
                 model.weights + \
                 base_model.weights + \
                 optimizer.variables() + \
@@ -220,11 +227,10 @@ while rollout_queue is not None:
                             update_idx = step_count // (NUM_EPOCHS * NUM_MINIBATCH)
                             break
 
-                observation_stats = np.reshape(observation_buffer, (-1, model.state_network.num_inputs))
-                model.state_network.update_input_statistics(sess,
-                                                            mean=observation_stats.mean(axis=0, keepdims=True),
-                                                            var=observation_stats.var(axis=0, keepdims=True),
-                                                            count=observation_stats.shape[0])
+                observation_stats = np.reshape(observation_buffer, (-1, input_normalizer.num_inputs))
+                input_normalizer.update(sess, mean=observation_stats.mean(axis=0, keepdims=True),
+                                        var=observation_stats.var(axis=0, keepdims=True),
+                                        count=observation_stats.shape[0])
                 if not stats_ready:
                     progress.set_postfix_str("Initial statistics gathered, commencing training session")
                     sess.run([sync_op, set_stats_ready_op])

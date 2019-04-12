@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Union, Callable
 from functools import reduce
 from model import AgentModule
+from model import InputNormalizer
 from tensorflow import initializers as init
 
 
@@ -86,16 +87,21 @@ class BootstrapManager:
 
 class AgentServerHook(server.ServerHook):
 
-    def __init__(self, model: AgentModule, num_clients: int, name="AgentServerHook"):
+    def __init__(self, input_normalizer: InputNormalizer, model: AgentModule, num_clients: int, name="AgentServerHook"):
         self.__reset__ = True
         self.name = name
+        self.input_normalizer = input_normalizer
         self.model = model
         self.num_clients = num_clients
         self.reset_state_p = tf.placeholder(tf.bool, shape=(1,))
-        self.observations_p = tf.placeholder(tf.float32, shape=(num_clients, 1, model.state_network.num_inputs))
+        self.observations_p = tf.placeholder(tf.float32, shape=(num_clients, 1,
+                                                                self.input_normalizer.num_inputs))
         self.internal_state_v = tf.Variable(init.zeros()(model.state_network.state_shape(num_clients)), trainable=False)
 
-        policy, state_value, output_state = model(self.observations_p, state_in=self.internal_state_v,
+        self.normalized_observations = tf.reshape(self.observations_p, (-1, self.input_normalizer.num_inputs))
+        self.normalized_observations = input_normalizer(self.normalized_observations)
+        self.normalized_observations = tf.reshape(self.normalized_observations, tf.shape(self.observations_p))
+        policy, state_value, output_state = model(self.normalized_observations, state_in=self.internal_state_v,
                                                   state_mask=tf.tile(self.reset_state_p, (num_clients,)))
         self.policy = policy
         with tf.control_dependencies([tf.assign(self.internal_state_v, output_state)]):
@@ -104,7 +110,7 @@ class AgentServerHook(server.ServerHook):
             
     @property
     def observation_structure(self):
-        return struct.Struct(">%df" % (self.model.state_network.num_inputs + 1))
+        return struct.Struct(">%df" % (self.input_normalizer.num_inputs + 1))
 
     @property
     def output_structure(self):
@@ -139,10 +145,10 @@ class AgentServerHook(server.ServerHook):
 class PowerTACGameHook(AgentServerHook):
     INTERPRETER_COMMAND = ["java", "-jar"]
 
-    def __init__(self, model: AgentModule, num_clients: int, powertac_port: int,
+    def __init__(self, input_normalizer: InputNormalizer,  model: AgentModule, num_clients: int, powertac_port: int,
                  cpu_semaphore: threading.BoundedSemaphore,
                  bootstrap_manager: BootstrapManager, name="AgentServerHook"):
-        super().__init__(model, num_clients, name)
+        super().__init__(input_normalizer, model, num_clients, name)
         self.powertac_port = powertac_port
         self.semaphore = cpu_semaphore
         self.bootstrap_manager = bootstrap_manager
@@ -205,13 +211,13 @@ class PowerTACGameHook(AgentServerHook):
 
 class PowerTACRolloutHook(PowerTACGameHook):
 
-    def __init__(self, model: AgentModule, num_clients: int, powertac_port: int,
+    def __init__(self, input_normalizer: InputNormalizer,  model: AgentModule, num_clients: int, powertac_port: int,
                  cpu_semaphore: threading.BoundedSemaphore,
                  bootstrap_manager: BootstrapManager,
                  nsteps: int, gamma: Union[Callable[[], float], float], lam: Union[Callable[[], float], float],
                  alt_model: AgentModule,
                  name="PowerTACRolloutHook"):
-        super().__init__(model, num_clients, powertac_port, cpu_semaphore, bootstrap_manager, name)
+        super().__init__(input_normalizer, model, num_clients, powertac_port, cpu_semaphore, bootstrap_manager, name)
 
         self.nsteps = nsteps
         self.rollout_queue = None
@@ -220,7 +226,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
         self.alt_model = alt_model
         self.alt_internal_state_v = tf.Variable(init.zeros()(self.model.state_network.state_shape(1)),
                                                 trainable=False)
-        policy, state_value, output_state = alt_model(self.observations_p[-1:, :, :],
+        policy, state_value, output_state = alt_model(self.normalized_observations[-1:, :, :],
                                                       state_in=self.alt_internal_state_v,
                                                       state_mask=self.reset_state_p)
         with tf.control_dependencies([tf.assign(self.alt_internal_state_v, output_state)]):
@@ -230,7 +236,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
         self.__states__ = None
         self.__reset_rollouts__ = np.zeros(shape=self.nsteps, dtype=np.bool)
         self.__observation_rollouts__ = np.zeros(shape=(self.num_clients, self.nsteps,
-                                                        self.model.state_network.num_inputs + 1),
+                                                        self.input_normalizer.num_inputs + 1),
                                                  dtype=np.float32)
         self.__action_rollouts__ = np.zeros(shape=(self.num_clients, self.nsteps, self.model.actor_network.num_outputs),
                                             dtype=np.float32)

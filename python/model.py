@@ -97,13 +97,21 @@ class InputNormalizer(NetworkModule):
         to perform normalization on the input data
     """
 
-    def __init__(self, epsilon=1e-8):
+    def __init__(self, mask=None, epsilon=1e-8):
         super().__init__()
+        self.__mask__ = mask
         self.__epsilon__ = epsilon
         self.__mean__ = tf.placeholder(tf.float32)
         self.__var__ = tf.placeholder(tf.float32)
         self.__count__ = tf.placeholder(tf.float32)
         self.__update_op__ = None
+
+    @property
+    def num_inputs(self):
+        if self.__mask__ is not None:
+            return self.__mask__.shape.as_list()[0]
+        else:
+            return None
 
     def update(self, session, mean, var, count):
         session.run(self.__update_op__, feed_dict={self.__mean__: mean, self.__var__: var, self.__count__: count})
@@ -128,11 +136,11 @@ class InputNormalizer(NetworkModule):
         super().__call__(inputs, *args, **kwargs)
 
         with tf.name_scope(type(self).__name__):
-            mask = kwargs['mask']
-            broadcast_mask = tf.tile(tf.expand_dims(mask, axis=0),
-                                     tf.concat([tf.shape(inputs)[:1], tf.ones(1, tf.int32)], axis=0))
             outputs = (inputs - self.__weight_map__['mean']) / tf.sqrt(self.__weight_map__['var'] + self.__epsilon__)
-            outputs = tf.where(broadcast_mask, outputs, inputs)
+            if self.__mask__ is not None:
+                broadcast_mask = tf.tile(tf.expand_dims(self.__mask__, axis=0),
+                                         tf.concat([tf.shape(inputs)[:1], tf.ones(1, tf.int32)], axis=0))
+                outputs = tf.where(broadcast_mask, outputs, inputs)
 
         return outputs
 
@@ -175,6 +183,7 @@ class ConvolutionEncoder(NetworkModule):
         l_initializer = init.orthogonal()
         k_initializer = self.__kernel_initializer__
         b_initializer = self.__bias_initializer__
+        o_initializer = init.ones()
 
         kernel_size = (int(input_shape[-1] - self.__projection_size__[1] + 1), 1,
                        input_shape[1], self.__projection_size__[0])
@@ -194,7 +203,7 @@ class ConvolutionEncoder(NetworkModule):
 
             if idx % self.__block_size__ == 1:
                 residx = idx // self.__block_size__
-                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(b_initializer((1, out_c, 1, 1)))
+                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(o_initializer((2, out_c, 1, 1)))
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
         super().__call__(inputs, *args, **kwargs)
@@ -227,8 +236,10 @@ class ConvolutionEncoder(NetworkModule):
 
                 if idx % self.__block_size__ == 1:
                     residx = idx // self.__block_size__
-                    resgate = tf.nn.sigmoid(self.__weight_map__["resgate_kernel_%d" % residx])
-                    conv_output = projection = ((1 - resgate) * conv_output) + (resgate * projection)
+                    resgate = tf.square(self.__weight_map__["resgate_kernel_%d" % residx])
+                    resgate = resgate / tf.reduce_sum(resgate, axis=0, keepdims=True)
+                    resgate = tf.split(resgate, 2, axis=0)
+                    conv_output = projection = (resgate[0] * conv_output) + (resgate[1] * projection)
 
             conv_output_shape = conv_output.shape.as_list()
             output = tf.reshape(conv_output, (-1, conv_output_shape[1] * conv_output_shape[2] * conv_output_shape[3]))
@@ -258,6 +269,7 @@ class DepthEncoder(NetworkModule):
         l_initializer = init.orthogonal()
         k_initializer = self.__kernel_initializer__
         b_initializer = self.__bias_initializer__
+        o_initializer = init.ones()
 
         kernel_size = (1, 1, 1, input_shape[1])
         inc_layer_count = (self.__num_output__ - input_shape[1]) // self.__num_layers__
@@ -277,7 +289,7 @@ class DepthEncoder(NetworkModule):
 
             if idx % self.__block_size__ == 1:
                 residx = idx // self.__block_size__
-                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(b_initializer((1, out_c, 1, 1)))
+                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(o_initializer((2, out_c, 1, 1)))
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
         super().__call__(inputs, *args, **kwargs)
@@ -302,8 +314,10 @@ class DepthEncoder(NetworkModule):
 
                 if idx % self.__block_size__ == 1:
                     residx = idx // self.__block_size__
-                    resgate = tf.nn.sigmoid(self.__weight_map__["resgate_kernel_%d" % residx])
-                    conv_output = projection = ((1 - resgate) * conv_output) + (resgate * projection)
+                    resgate = tf.square(self.__weight_map__["resgate_kernel_%d" % residx])
+                    resgate = resgate / tf.reduce_sum(resgate, axis=0, keepdims=True)
+                    resgate = tf.split(resgate, 2, axis=0)
+                    conv_output = projection = (resgate[0] * conv_output) + (resgate[1] * projection)
 
             conv_output_shape = conv_output.shape.as_list()
             output = tf.reshape(conv_output, (-1, conv_output_shape[1] * conv_output_shape[2] * conv_output_shape[3]))
@@ -329,6 +343,7 @@ class DenseEncoder(NetworkModule):
         l_initializer = init.orthogonal()
         k_initializer = self.__kernel_initializer__
         b_initializer = self.__bias_initializer__
+        o_initializer = init.ones()
 
         kernel_size = (1, input_shape[1])
         inc_layer_count = (self.__num_output__ - input_shape[1]) // self.__num_layers__
@@ -348,7 +363,7 @@ class DenseEncoder(NetworkModule):
 
             if idx % self.__block_size__ == 1:
                 residx = idx // self.__block_size__
-                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(b_initializer((1, out_c)))
+                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(o_initializer((2, out_c)))
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
         super().__call__(inputs)
@@ -364,8 +379,10 @@ class DenseEncoder(NetworkModule):
 
                 if idx % self.__block_size__ == 1:
                     residx = idx // self.__block_size__
-                    resgate = tf.nn.sigmoid(self.__weight_map__["resgate_kernel_%d" % residx])
-                    output = projection = ((1 - resgate) * output) + (resgate * projection)
+                    resgate = tf.square(self.__weight_map__["resgate_kernel_%d" % residx])
+                    resgate = resgate / tf.reduce_sum(resgate, axis=0, keepdims=True)
+                    resgate = tf.split(resgate, 2, axis=0)
+                    output = projection = (resgate[0] * output) + (resgate[1] * projection)
 
         return output
 
@@ -603,7 +620,6 @@ class StateNetwork(NetworkModule):
     def __init__(self):
         super().__init__()
         self.__power_type_encoding_size__ = 2
-        self.__input_normalizer__ = InputNormalizer()
         self.__weather_encoder__ = ConvolutionEncoder(128)
         self.__market_encoder__ = ConvolutionEncoder(128)
         self.__tariff_encoder__ = DepthEncoder(16)
@@ -611,20 +627,13 @@ class StateNetwork(NetworkModule):
         self.__state_encoder__ = rnn.CudnnLSTM(1, 1024,
                                                kernel_initializer=init.orthogonal(),
                                                bias_initializer=init.zeros())
-        self.__normalization_mask__ = tf.convert_to_tensor([*([False] * 4), *([True] * 3),
-                                                            *([True, True, True, False, False] * 25),
-                                                            *([True] * 194), *([False, *([True] * 22)] * 20)])
 
     @property
     def weights(self):
-        return super().weights + self.__input_normalizer__.weights + \
+        return super().weights + \
                self.__weather_encoder__.weights + \
                self.__market_encoder__.weights + self.__tariff_encoder__.weights + \
                self.__observation_encoder__.weights + self.__state_encoder__.weights
-
-    @property
-    def num_inputs(self):
-        return self.__normalization_mask__.shape.as_list()[0]
 
     def state_shape(self, batch_size):
         return batch_size, self.__state_encoder__.num_units, 2
@@ -635,9 +644,6 @@ class StateNetwork(NetworkModule):
 
         self.__weight_map__['initial_state'] = tf.Variable(tf.zeros(self.state_shape(1)))
         self.__weight_map__['power_type_encoding'] = tf.Variable(k_init((14, self.__power_type_encoding_size__)))
-
-    def update_input_statistics(self, session, mean, var, count):
-        self.__input_normalizer__.update(session, mean, var, count)
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
         super().__call__(inputs, *args, **kwargs)
@@ -652,7 +658,6 @@ class StateNetwork(NetworkModule):
                                state_in)
 
             output = tf.reshape(inputs, (-1, input_shape[-1]))
-            output = self.__input_normalizer__(output, mask=self.__normalization_mask__)
             output = tf.split(output, [7, 125, 168, 26, 460], axis=-1)
             output[1] = self.__weather_encoder__(tf.transpose(tf.reshape(output[1], (-1, 25, 5)), (0, 2, 1)))
             output[2] = self.__market_encoder__(tf.reshape(output[2], (-1, 7, 24)))
