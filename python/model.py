@@ -183,7 +183,6 @@ class ConvolutionEncoder(NetworkModule):
         l_initializer = init.orthogonal()
         k_initializer = self.__kernel_initializer__
         b_initializer = self.__bias_initializer__
-        o_initializer = init.ones()
 
         kernel_size = (int(input_shape[-1] - self.__projection_size__[1] + 1), 1,
                        input_shape[1], self.__projection_size__[0])
@@ -201,9 +200,17 @@ class ConvolutionEncoder(NetworkModule):
             self.__weight_map__["projection_kernel_%d" % idx] = tf.Variable(l_initializer(kernel_size))
             self.__weight_map__["projection_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
 
+            initial_res_value = np.array([1 / (self.__block_size__ + 1)] * (self.__block_size__ + 1))
+            initial_res_denom = np.cumsum(initial_res_value)
             if idx % self.__block_size__ == 1:
                 residx = idx // self.__block_size__
-                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(o_initializer((2, out_c, 1, 1)))
+                resnidx = residx + 1
+                initial_conv_gate = initial_res_value[resnidx] / initial_res_denom[resnidx]
+                initial_res_gate = initial_res_denom[residx] / initial_res_denom[resnidx]
+                initial_rgate_value = np.stack([initial_res_gate, initial_conv_gate], axis=0)
+                initial_rgate_value = np.reshape(initial_rgate_value, (2, 1, 1, 1))
+                initial_rgate_value = np.sqrt(np.repeat(initial_rgate_value, out_c, axis=1))
+                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(initial_rgate_value, dtype=tf.float32)
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
         super().__call__(inputs, *args, **kwargs)
@@ -216,8 +223,8 @@ class ConvolutionEncoder(NetworkModule):
                                                       name='SpatialProjection'),
                                          self.__weight_map__['initial_projection_bias'],
                                          data_format='NCHW')
-            projection = conv_output
 
+            projection = conv_output
             for idx in range(self.__num_layers__):
                 projection = tf.nn.bias_add(tf.nn.conv2d(projection,
                                                          self.__weight_map__["projection_kernel_%d" % idx],
@@ -239,7 +246,7 @@ class ConvolutionEncoder(NetworkModule):
                     resgate = tf.square(self.__weight_map__["resgate_kernel_%d" % residx])
                     resgate = resgate / tf.reduce_sum(resgate, axis=0, keepdims=True)
                     resgate = tf.split(resgate, 2, axis=0)
-                    conv_output = projection = (resgate[0] * conv_output) + (resgate[1] * projection)
+                    conv_output = projection = (resgate[1] * conv_output) + (resgate[0] * projection)
 
             conv_output_shape = conv_output.shape.as_list()
             output = tf.reshape(conv_output, (-1, conv_output_shape[1] * conv_output_shape[2] * conv_output_shape[3]))
@@ -269,7 +276,6 @@ class DepthEncoder(NetworkModule):
         l_initializer = init.orthogonal()
         k_initializer = self.__kernel_initializer__
         b_initializer = self.__bias_initializer__
-        o_initializer = init.ones()
 
         kernel_size = (1, 1, 1, input_shape[1])
         inc_layer_count = (self.__num_output__ - input_shape[1]) // self.__num_layers__
@@ -287,9 +293,17 @@ class DepthEncoder(NetworkModule):
             self.__weight_map__["projection_kernel_%d" % idx] = tf.Variable(l_initializer(kernel_size))
             self.__weight_map__["projection_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
 
+            initial_res_value = np.array([1 / (self.__block_size__ + 1)] * (self.__block_size__ + 1))
+            initial_res_denom = np.cumsum(initial_res_value)
             if idx % self.__block_size__ == 1:
                 residx = idx // self.__block_size__
-                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(o_initializer((2, out_c, 1, 1)))
+                resnidx = residx + 1
+                initial_conv_gate = initial_res_value[resnidx] / initial_res_denom[resnidx]
+                initial_res_gate = initial_res_denom[residx] / initial_res_denom[resnidx]
+                initial_rgate_value = np.stack([initial_res_gate, initial_conv_gate], axis=0)
+                initial_rgate_value = np.reshape(initial_rgate_value, (2, 1, 1, 1))
+                initial_rgate_value = np.sqrt(np.repeat(initial_rgate_value, out_c, axis=1))
+                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(initial_rgate_value, dtype=tf.float32)
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
         super().__call__(inputs, *args, **kwargs)
@@ -317,7 +331,7 @@ class DepthEncoder(NetworkModule):
                     resgate = tf.square(self.__weight_map__["resgate_kernel_%d" % residx])
                     resgate = resgate / tf.reduce_sum(resgate, axis=0, keepdims=True)
                     resgate = tf.split(resgate, 2, axis=0)
-                    conv_output = projection = (resgate[0] * conv_output) + (resgate[1] * projection)
+                    conv_output = projection = (resgate[1] * conv_output) + (resgate[0] * projection)
 
             conv_output_shape = conv_output.shape.as_list()
             output = tf.reshape(conv_output, (-1, conv_output_shape[1] * conv_output_shape[2] * conv_output_shape[3]))
@@ -343,7 +357,6 @@ class DenseEncoder(NetworkModule):
         l_initializer = init.orthogonal()
         k_initializer = self.__kernel_initializer__
         b_initializer = self.__bias_initializer__
-        o_initializer = init.ones()
 
         kernel_size = (1, input_shape[1])
         inc_layer_count = (self.__num_output__ - input_shape[1]) // self.__num_layers__
@@ -361,9 +374,17 @@ class DenseEncoder(NetworkModule):
             self.__weight_map__["projection_kernel_%d" % idx] = tf.Variable(l_initializer(kernel_size))
             self.__weight_map__["projection_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
 
+            initial_res_value = np.array([1 / (self.__block_size__ + 1)] * (self.__block_size__ + 1))
+            initial_res_denom = np.cumsum(initial_res_value)
             if idx % self.__block_size__ == 1:
                 residx = idx // self.__block_size__
-                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(o_initializer((2, out_c)))
+                resnidx = residx + 1
+                initial_conv_gate = initial_res_value[resnidx] / initial_res_denom[resnidx]
+                initial_res_gate = initial_res_denom[residx] / initial_res_denom[resnidx]
+                initial_rgate_value = np.stack([initial_res_gate, initial_conv_gate], axis=0)
+                initial_rgate_value = np.reshape(initial_rgate_value, (2, 1))
+                initial_rgate_value = np.sqrt(np.repeat(initial_rgate_value, out_c, axis=1))
+                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(initial_rgate_value, dtype=tf.float32)
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
         super().__call__(inputs)
@@ -382,7 +403,7 @@ class DenseEncoder(NetworkModule):
                     resgate = tf.square(self.__weight_map__["resgate_kernel_%d" % residx])
                     resgate = resgate / tf.reduce_sum(resgate, axis=0, keepdims=True)
                     resgate = tf.split(resgate, 2, axis=0)
-                    output = projection = (resgate[0] * output) + (resgate[1] * projection)
+                    output = projection = (resgate[1] * output) + (resgate[0] * projection)
 
         return output
 
@@ -664,9 +685,11 @@ class StateNetwork(NetworkModule):
             output[4] = self.__tariff_encoder__(self.__encode_power_type__(output[4]))
             output = tf.concat(output, axis=-1)
             output = self.__observation_encoder__(output)
-            output = tf.reshape(output, (input_shape[1], -1, output.shape.as_list()[-1]))
+            output = tf.reshape(output, (-1, input_shape[1], output.shape.as_list()[-1]))
+            output = tf.transpose(output, (1, 0, 2))
             output, state_out = self.__state_encoder__(output,
                                                        tuple(tf.unstack(tf.expand_dims(p_state, axis=0), axis=-1)))
+            output = tf.transpose(output, (1, 0, 2))
             output = tf.reshape(output, (-1, self.__state_encoder__.num_units))
             state_out = tf.squeeze(tf.stack(state_out, axis=-1), axis=0)
 

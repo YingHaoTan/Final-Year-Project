@@ -22,12 +22,12 @@ PPO_EPSILON = 0.2
 PORT = 60000
 PT_PORT = 50000
 ROLLOUT_STEPS = 168
-BUFFER_SIZE = 648
-NUM_MINIBATCH = 18
+BUFFER_SIZE = 630
+NUM_MINIBATCH = 21
 NUM_EPOCHS = 16
-MAX_EPOCHS = 5000 * NUM_EPOCHS
-WARMUP_PHASE = 1 * NUM_EPOCHS
-MAX_PHASE = 500 * NUM_EPOCHS
+UPDATE_STEPS = NUM_MINIBATCH * NUM_EPOCHS
+MAX_UPDATE_STEPS = 5000 * UPDATE_STEPS
+WARMUP_PHASE = 1 * UPDATE_STEPS
 LEARNING_RATE = 0.00025
 
 colorama.init()
@@ -46,7 +46,7 @@ def create_progress():
 
 
 np.warnings.filterwarnings('ignore')
-print("Setting up trainer to perform %d training epochs" % MAX_EPOCHS)
+print("Setting up trainer to perform %d training epochs" % (MAX_UPDATE_STEPS // NUM_MINIBATCH))
 
 logging.basicConfig(filename="main.log", level=logging.INFO,
                     format="%(asctime)s - %(threadName)s - %(levelname)s - %(message)s")
@@ -106,38 +106,39 @@ base_policy, base_state_value, _ = base_model(d_obs, state_in=d_state, state_mas
 prob_ratio = tf.exp(policy.log_prob(d_action) - base_policy.log_prob(d_action))
 clipped_prob_ratio = tf.clip_by_value(prob_ratio, 1 - PPO_EPSILON, 1 + PPO_EPSILON)
 policy_loss = -tf.reduce_mean(tf.minimum(prob_ratio * d_adv, clipped_prob_ratio * d_adv))
-value_loss = tf.reduce_mean(tf.square(d_reward - state_value))
+value_loss = 0.5 * tf.reduce_mean(tf.square(d_reward - state_value))
 entropy_loss = 0.01 * tf.reduce_mean(policy.entropy())
 loss = policy_loss + value_loss - entropy_loss
 
 global_step = tf.train.create_global_step()
-warmup_steps = WARMUP_PHASE * NUM_MINIBATCH
+warmup_steps = WARMUP_PHASE
 learning_rate = tf.train.polynomial_decay(0.0, global_step, warmup_steps, LEARNING_RATE)
-optimizer = tf.train.RMSPropOptimizer(learning_rate, decay=0.99, centered=True)
 grads = tf.gradients(loss, model.trainable_weights)
 clipped_grads, global_norm = tf.clip_by_global_norm(grads, 50.0)
 gv_list = zip(clipped_grads, model.trainable_weights)
+optimizer = tf.train.RMSPropOptimizer(learning_rate, decay=0.99, centered=True)
 train_op = optimizer.apply_gradients(gv_list, global_step=global_step)
 
 # Tensorboard summary operations
-parameter_delta = list(map(lambda x: model.trainable_weights[x] - base_model.trainable_weights[x],
-                           range(len(base_model.trainable_weights))))
-parameter_delta = tf.concat(list(map(lambda x: tf.reshape(x, [-1]), parameter_delta)), axis=0)
 tf.summary.scalar("GlobalNorm", global_norm)
 tf.summary.histogram("Cash", cash_variable)
 tf.summary.histogram("Advantage", d_adv)
-tf.summary.histogram("ParameterDelta", parameter_delta)
+tf.summary.histogram("Observation", d_obs)
+tf.summary.histogram("ClippedGradient", tf.concat([tf.reshape(grad, [-1]) for grad in clipped_grads], axis=0))
 with tf.name_scope("Losses"):
     tf.summary.scalar("Policy", policy_loss)
     tf.summary.scalar("Value", value_loss)
     tf.summary.scalar("Entropy", entropy_loss)
     tf.summary.scalar("Combined", loss)
-with tf.name_scope("Gradients"):
-    tf.summary.histogram("Clipped", tf.concat([tf.reshape(grad, [-1]) for grad in clipped_grads], axis=0))
 with tf.name_scope("Reward"):
     tf.summary.histogram("Actual", d_reward)
     tf.summary.histogram("Trained Prediction", state_value)
     tf.summary.histogram("Base Prediction", base_state_value)
+with tf.name_scope("Parameter"):
+    tf.summary.histogram("State", tf.concat([tf.reshape(w, [-1]) for w in model.state_network.weights],
+                                            axis=0))
+    tf.summary.histogram("Actor", tf.concat([tf.reshape(w, [-1]) for w in model.actor_network.weights],
+                                            axis=0))
 with tf.name_scope("ProbabilityRatio"):
     tf.summary.histogram("Clipped", clipped_prob_ratio)
     tf.summary.histogram("Unclipped", prob_ratio)
@@ -219,7 +220,10 @@ while rollout_queue is not None:
                     summary_value = None
                     while True:
                         try:
-                            _, summary_value, step_count = sess.run([train_op, summary_op, global_step])
+                            if (step_count + 1) % UPDATE_STEPS == UPDATE_STEPS - 1:
+                                _, summary_value, step_count = sess.run([train_op, summary_op, global_step])
+                            else:
+                                _, step_count = sess.run([train_op, global_step])
                             logging.info("Updating agent parameters step %d" % step_count)
                         except tf.errors.OutOfRangeError:
                             saver.save(sess, CHECKPOINT_PREFIX, global_step=step_count)
@@ -242,7 +246,7 @@ while rollout_queue is not None:
                 rollout_queue, stats_ready, progress = queue.Queue(), True, None
                 break
 
-    if step_count > MAX_EPOCHS * NUM_MINIBATCH:
+    if step_count > MAX_UPDATE_STEPS:
         print("Completed training process, terminating session")
         utility.apply(lambda server: server.stop(), servers)
         rollout_queue = None
