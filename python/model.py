@@ -68,8 +68,14 @@ import numpy as np
 class NetworkModule:
     """Abstract base class for neural network modules"""
 
-    def __init__(self):
+    def __init__(self, name=None):
+        name = '' if name is None else "%s/" % name if name[-1] != '/' else name
+
         self.__built__ = False
+        self.__scope__ = "%s%s/" % (name, type(self).__name__)
+        self.__scope__ = tf.name_scope(self.__scope__)
+        self.__parameter_scope__ = tf.name_scope("%s%s/" % (self.__scope__.name, 'parameters'))
+        self.__operation_scope__ = tf.name_scope("%s%s/" % (self.__scope__.name, 'operations'))
         self.__weight_map__ = {}
 
     @property
@@ -90,6 +96,10 @@ class NetworkModule:
         if not self.__built__:
             self.build(inputs.shape.as_list())
 
+    def __create_weights__(self, initial_value, name):
+        with self.__parameter_scope__:
+            self.__weight_map__[name] = tf.Variable(initial_value, name=name)
+
 
 class InputNormalizer(NetworkModule):
     """
@@ -97,8 +107,8 @@ class InputNormalizer(NetworkModule):
         to perform normalization on the input data
     """
 
-    def __init__(self, mask=None, epsilon=1e-8):
-        super().__init__()
+    def __init__(self, mask=None, epsilon=1e-8, name=None):
+        super().__init__(name)
         self.__mask__ = mask
         self.__epsilon__ = epsilon
         self.__mean__ = tf.placeholder(tf.float32)
@@ -119,23 +129,24 @@ class InputNormalizer(NetworkModule):
     def build(self, input_shape: list):
         super().build(input_shape)
 
-        self.__weight_map__['mean'] = tf.Variable(tf.zeros((1, input_shape[-1])), trainable=False)
-        self.__weight_map__['var'] = tf.Variable(tf.zeros((1, input_shape[-1])), trainable=False)
-        self.__weight_map__['count'] = tf.Variable(tf.zeros(()), trainable=False)
+        with self.__parameter_scope__:
+            self.__weight_map__['mean'] = tf.Variable(tf.zeros((1, input_shape[-1])), trainable=False)
+            self.__weight_map__['var'] = tf.Variable(tf.zeros((1, input_shape[-1])), trainable=False)
+            self.__weight_map__['count'] = tf.Variable(tf.zeros(()), trainable=False)
 
-        mean, var, count = tf.cond(self.__weight_map__['count'] > 0.0,
-                                   lambda: self.__calculate_statistics__(),
-                                   lambda: (self.__mean__, self.__var__, self.__count__))
-        self.__update_op__ = tf.group([
-            tf.assign(self.__weight_map__['mean'], mean),
-            tf.assign(self.__weight_map__['var'], var),
-            tf.assign(self.__weight_map__['count'], count)
-        ])
+            mean, var, count = tf.cond(self.__weight_map__['count'] > 0.0,
+                                       lambda: self.__calculate_statistics__(),
+                                       lambda: (self.__mean__, self.__var__, self.__count__))
+            self.__update_op__ = tf.group([
+                tf.assign(self.__weight_map__['mean'], mean),
+                tf.assign(self.__weight_map__['var'], var),
+                tf.assign(self.__weight_map__['count'], count)
+            ])
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
         super().__call__(inputs, *args, **kwargs)
 
-        with tf.name_scope(type(self).__name__):
+        with self.__operation_scope__:
             outputs = (inputs - self.__weight_map__['mean']) / tf.sqrt(self.__weight_map__['var'] + self.__epsilon__)
             if self.__mask__ is not None:
                 broadcast_mask = tf.tile(tf.expand_dims(self.__mask__, axis=0),
@@ -163,8 +174,9 @@ class ConvolutionEncoder(NetworkModule):
 
     def __init__(self, num_output, initial_dim=(8, 24),
                  ssizes=(2, 2, 2, 3), res_block_size=2, activation=tf.nn.relu,
-                 kernel_initializer=init.orthogonal(np.sqrt(2)), bias_initializer=init.zeros()):
-        super().__init__()
+                 kernel_initializer=init.orthogonal(np.sqrt(2)), bias_initializer=init.zeros(),
+                 name=None):
+        super().__init__(name)
         self.__num_output__ = num_output
         self.__num_layers__ = len(ssizes)
         self.__projection_size__ = initial_dim
@@ -186,36 +198,34 @@ class ConvolutionEncoder(NetworkModule):
 
         kernel_size = (int(input_shape[-1] - self.__projection_size__[1] + 1), 1,
                        input_shape[1], self.__projection_size__[0])
-        self.__weight_map__['initial_projection_kernel'] = tf.Variable(l_initializer(kernel_size))
-        self.__weight_map__['initial_projection_bias'] = tf.Variable(b_initializer(self.__projection_size__[0]))
+        self.__create_weights__(l_initializer(kernel_size), 'initial_projection_kernel')
+        self.__create_weights__(b_initializer(self.__projection_size__[0]), 'initial_projection_bias')
 
+        projection_in_c = self.__projection_size__[0]
+        projection_out_k = 1
         for idx in range(self.__num_layers__):
             out_c = int(self.__num_output__ / (2 ** (self.__num_layers__ - idx - 1)))
 
             kernel_size = (3, 1, kernel_size[-1], out_c)
-            self.__weight_map__["conv_kernel_%d" % idx] = tf.Variable(k_initializer(kernel_size))
-            self.__weight_map__["conv_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
+            self.__create_weights__(k_initializer(kernel_size), "conv_kernel_%d" % idx)
+            self.__create_weights__(b_initializer(out_c), "conv_bias_%d" % idx)
 
-            kernel_size = (self.__strides__[idx], 1, kernel_size[-2], out_c)
-            self.__weight_map__["projection_kernel_%d" % idx] = tf.Variable(l_initializer(kernel_size))
-            self.__weight_map__["projection_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
+            projection_out_k = projection_out_k * self.__strides__[idx]
 
-            initial_res_value = np.array([1 / (self.__block_size__ + 1)] * (self.__block_size__ + 1))
-            initial_res_denom = np.cumsum(initial_res_value)
             if idx % self.__block_size__ == 1:
                 residx = idx // self.__block_size__
-                resnidx = residx + 1
-                initial_conv_gate = initial_res_value[resnidx] / initial_res_denom[resnidx]
-                initial_res_gate = initial_res_denom[residx] / initial_res_denom[resnidx]
-                initial_rgate_value = np.stack([initial_res_gate, initial_conv_gate], axis=0)
-                initial_rgate_value = np.reshape(initial_rgate_value, (2, 1, 1, 1))
-                initial_rgate_value = np.sqrt(np.repeat(initial_rgate_value, out_c, axis=1))
-                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(initial_rgate_value, dtype=tf.float32)
+
+                p_kernel_size = (projection_out_k, 1, projection_in_c, out_c)
+                self.__create_weights__(l_initializer(p_kernel_size), "projection_kernel_%d" % residx)
+                self.__create_weights__(b_initializer(out_c), "projection_bias_%d" % residx)
+
+                projection_in_c = out_c
+                projection_out_k = 1
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
         super().__call__(inputs, *args, **kwargs)
 
-        with tf.name_scope(type(self).__name__):
+        with self.__operation_scope__:
             expanded_inputs = tf.expand_dims(inputs, axis=-1)
 
             conv_output = tf.nn.bias_add(tf.nn.conv2d(expanded_inputs, self.__weight_map__['initial_projection_kernel'],
@@ -225,13 +235,8 @@ class ConvolutionEncoder(NetworkModule):
                                          data_format='NCHW')
 
             projection = conv_output
+            projection_stride = 1
             for idx in range(self.__num_layers__):
-                projection = tf.nn.bias_add(tf.nn.conv2d(projection,
-                                                         self.__weight_map__["projection_kernel_%d" % idx],
-                                                         [1, 1, self.__strides__[idx], 1],
-                                                         padding='SAME', data_format='NCHW', name="Conv%d" % idx),
-                                            self.__weight_map__["projection_bias_%d" % idx],
-                                            data_format='NCHW')
                 conv_output = tf.nn.bias_add(tf.nn.conv2d(conv_output,
                                                           self.__weight_map__["conv_kernel_%d" % idx],
                                                           [1, 1, self.__strides__[idx], 1],
@@ -240,13 +245,20 @@ class ConvolutionEncoder(NetworkModule):
                                              self.__weight_map__["conv_bias_%d" % idx],
                                              data_format='NCHW')
                 conv_output = self.__activation__(conv_output)
+                projection_stride = projection_stride * self.__strides__[idx]
 
                 if idx % self.__block_size__ == 1:
                     residx = idx // self.__block_size__
-                    resgate = tf.square(self.__weight_map__["resgate_kernel_%d" % residx])
-                    resgate = resgate / tf.reduce_sum(resgate, axis=0, keepdims=True)
-                    resgate = tf.split(resgate, 2, axis=0)
-                    conv_output = projection = (resgate[1] * conv_output) + (resgate[0] * projection)
+
+                    projection = tf.nn.bias_add(tf.nn.conv2d(projection,
+                                                             self.__weight_map__["projection_kernel_%d" % residx],
+                                                             [1, 1, projection_stride, 1],
+                                                             padding='SAME', data_format='NCHW',
+                                                             name="Conv%d" % residx),
+                                                self.__weight_map__["projection_bias_%d" % residx],
+                                                data_format='NCHW')
+
+                    conv_output = projection = conv_output + projection
 
             conv_output_shape = conv_output.shape.as_list()
             output = tf.reshape(conv_output, (-1, conv_output_shape[1] * conv_output_shape[2] * conv_output_shape[3]))
@@ -258,8 +270,9 @@ class DepthEncoder(NetworkModule):
     """DepthEncoder to encode the depth/channel of a convolutional neural network"""
 
     def __init__(self, num_output, num_layers=2, res_block_size=2, activation=tf.nn.relu,
-                 kernel_initializer=init.orthogonal(np.sqrt(2)), bias_initializer=init.zeros()):
-        super().__init__()
+                 kernel_initializer=init.orthogonal(np.sqrt(2)), bias_initializer=init.zeros(),
+                 name=None):
+        super().__init__(name)
         self.__num_output__ = num_output
         self.__num_layers__ = num_layers
         self.__block_size__ = res_block_size
@@ -277,8 +290,9 @@ class DepthEncoder(NetworkModule):
         k_initializer = self.__kernel_initializer__
         b_initializer = self.__bias_initializer__
 
-        kernel_size = (1, 1, 1, input_shape[1])
         inc_layer_count = (self.__num_output__ - input_shape[1]) // self.__num_layers__
+        kernel_size = (1, 1, 1, input_shape[1])
+        projection_in_c = input_shape[1]
         for idx in range(self.__num_layers__):
             if idx < self.__num_layers__ - 1:
                 out_c = kernel_size[-1] + inc_layer_count
@@ -286,38 +300,26 @@ class DepthEncoder(NetworkModule):
                 out_c = self.__num_output__
                 
             kernel_size = (1, 1, kernel_size[-1], out_c)
-            self.__weight_map__["conv_kernel_%d" % idx] = tf.Variable(k_initializer(kernel_size))
-            self.__weight_map__["conv_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
+            self.__create_weights__(k_initializer(kernel_size), "conv_kernel_%d" % idx)
+            self.__create_weights__(b_initializer(out_c), "conv_bias_%d" % idx)
 
-            kernel_size = (1, 1, kernel_size[-2], out_c)
-            self.__weight_map__["projection_kernel_%d" % idx] = tf.Variable(l_initializer(kernel_size))
-            self.__weight_map__["projection_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
-
-            initial_res_value = np.array([1 / (self.__block_size__ + 1)] * (self.__block_size__ + 1))
-            initial_res_denom = np.cumsum(initial_res_value)
             if idx % self.__block_size__ == 1:
                 residx = idx // self.__block_size__
-                resnidx = residx + 1
-                initial_conv_gate = initial_res_value[resnidx] / initial_res_denom[resnidx]
-                initial_res_gate = initial_res_denom[residx] / initial_res_denom[resnidx]
-                initial_rgate_value = np.stack([initial_res_gate, initial_conv_gate], axis=0)
-                initial_rgate_value = np.reshape(initial_rgate_value, (2, 1, 1, 1))
-                initial_rgate_value = np.sqrt(np.repeat(initial_rgate_value, out_c, axis=1))
-                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(initial_rgate_value, dtype=tf.float32)
+
+                p_kernel_size = (1, 1, projection_in_c, out_c)
+                self.__create_weights__(l_initializer(p_kernel_size), "projection_kernel_%d" % residx)
+                self.__create_weights__(b_initializer(out_c), "projection_bias_%d" % residx)
+
+                projection_in_c = out_c
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
         super().__call__(inputs, *args, **kwargs)
 
-        with tf.name_scope(type(self).__name__):
+        with self.__operation_scope__:
             expanded_inputs = tf.expand_dims(inputs, axis=-1)
 
             conv_output = projection = expanded_inputs
             for idx in range(self.__num_layers__):
-                projection = tf.nn.bias_add(tf.nn.conv2d(projection, self.__weight_map__["projection_kernel_%d" % idx],
-                                                         [1, 1, 1, 1], padding='VALID',
-                                                         data_format='NCHW', name="Conv%d" % idx),
-                                            self.__weight_map__["projection_bias_%d" % idx],
-                                            data_format='NCHW')
                 conv_output = tf.nn.bias_add(tf.nn.conv2d(conv_output,
                                                           self.__weight_map__["conv_kernel_%d" % idx],
                                                           [1, 1, 1, 1], padding='VALID',
@@ -328,10 +330,16 @@ class DepthEncoder(NetworkModule):
 
                 if idx % self.__block_size__ == 1:
                     residx = idx // self.__block_size__
-                    resgate = tf.square(self.__weight_map__["resgate_kernel_%d" % residx])
-                    resgate = resgate / tf.reduce_sum(resgate, axis=0, keepdims=True)
-                    resgate = tf.split(resgate, 2, axis=0)
-                    conv_output = projection = (resgate[1] * conv_output) + (resgate[0] * projection)
+
+                    projection = tf.nn.bias_add(tf.nn.conv2d(projection,
+                                                             self.__weight_map__["projection_kernel_%d" % residx],
+                                                             [1, 1, 1, 1],
+                                                             padding='SAME', data_format='NCHW',
+                                                             name="Conv%d" % residx),
+                                                self.__weight_map__["projection_bias_%d" % residx],
+                                                data_format='NCHW')
+
+                    conv_output = projection = conv_output + projection
 
             conv_output_shape = conv_output.shape.as_list()
             output = tf.reshape(conv_output, (-1, conv_output_shape[1] * conv_output_shape[2] * conv_output_shape[3]))
@@ -343,8 +351,9 @@ class DenseEncoder(NetworkModule):
     """DenseEncoder to represent a fully connected neural network"""
 
     def __init__(self, num_output, num_layers=2, res_block_size=2, activation=tf.nn.relu,
-                 kernel_initializer=init.orthogonal(np.sqrt(2)), bias_initializer=init.zeros()):
-        super().__init__()
+                 kernel_initializer=init.orthogonal(np.sqrt(2)), bias_initializer=init.zeros(),
+                 name=None):
+        super().__init__(name)
         self.__num_output__ = num_output
         self.__num_layers__ = num_layers
         self.__block_size__ = res_block_size
@@ -358,8 +367,9 @@ class DenseEncoder(NetworkModule):
         k_initializer = self.__kernel_initializer__
         b_initializer = self.__bias_initializer__
 
-        kernel_size = (1, input_shape[1])
         inc_layer_count = (self.__num_output__ - input_shape[1]) // self.__num_layers__
+        kernel_size = (1, input_shape[1])
+        projection_in_c = input_shape[1]
         for idx in range(self.__num_layers__):
             if idx < self.__num_layers__ - 1:
                 out_c = kernel_size[-1] + inc_layer_count
@@ -367,43 +377,36 @@ class DenseEncoder(NetworkModule):
                 out_c = self.__num_output__
 
             kernel_size = (kernel_size[-1], out_c)
-            self.__weight_map__["dense_kernel_%d" % idx] = tf.Variable(k_initializer(kernel_size))
-            self.__weight_map__["dense_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
+            self.__create_weights__(k_initializer(kernel_size), "dense_kernel_%d" % idx)
+            self.__create_weights__(b_initializer(out_c), "dense_bias_%d" % idx)
 
-            kernel_size = (kernel_size[-2], out_c)
-            self.__weight_map__["projection_kernel_%d" % idx] = tf.Variable(l_initializer(kernel_size))
-            self.__weight_map__["projection_bias_%d" % idx] = tf.Variable(b_initializer(out_c))
-
-            initial_res_value = np.array([1 / (self.__block_size__ + 1)] * (self.__block_size__ + 1))
-            initial_res_denom = np.cumsum(initial_res_value)
             if idx % self.__block_size__ == 1:
                 residx = idx // self.__block_size__
-                resnidx = residx + 1
-                initial_conv_gate = initial_res_value[resnidx] / initial_res_denom[resnidx]
-                initial_res_gate = initial_res_denom[residx] / initial_res_denom[resnidx]
-                initial_rgate_value = np.stack([initial_res_gate, initial_conv_gate], axis=0)
-                initial_rgate_value = np.reshape(initial_rgate_value, (2, 1))
-                initial_rgate_value = np.sqrt(np.repeat(initial_rgate_value, out_c, axis=1))
-                self.__weight_map__["resgate_kernel_%d" % residx] = tf.Variable(initial_rgate_value, dtype=tf.float32)
+
+                p_kernel_size = (projection_in_c, out_c)
+                self.__create_weights__(l_initializer(p_kernel_size), "projection_kernel_%d" % residx)
+                self.__create_weights__(b_initializer(out_c), "projection_bias_%d" % residx)
+
+                projection_in_c = out_c
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
         super().__call__(inputs)
 
-        with tf.name_scope(type(self).__name__):
+        with self.__operation_scope__:
             output = projection = inputs
             for idx in range(self.__num_layers__):
-                projection = tf.nn.bias_add(tf.matmul(projection, self.__weight_map__["projection_kernel_%d" % idx]),
-                                            self.__weight_map__["projection_bias_%d" % idx])
                 output = self.__activation__(tf.nn.bias_add(tf.matmul(output,
                                                                       self.__weight_map__["dense_kernel_%d" % idx]),
                                                             self.__weight_map__["dense_bias_%d" % idx]))
 
                 if idx % self.__block_size__ == 1:
                     residx = idx // self.__block_size__
-                    resgate = tf.square(self.__weight_map__["resgate_kernel_%d" % residx])
-                    resgate = resgate / tf.reduce_sum(resgate, axis=0, keepdims=True)
-                    resgate = tf.split(resgate, 2, axis=0)
-                    output = projection = (resgate[1] * output) + (resgate[0] * projection)
+
+                    projection = tf.nn.bias_add(tf.matmul(projection,
+                                                          self.__weight_map__["projection_kernel_%d" % residx]),
+                                                self.__weight_map__["projection_bias_%d" % residx])
+
+                    output = projection = output + projection
 
         return output
 
@@ -626,7 +629,7 @@ class GaussianPolicy(PolicyModule):
 
     def build(self, input_shape: Union[list, tuple]):
         super().build(input_shape)
-        self.__weight_map__['log_std_params'] = tf.Variable(init.zeros()(self.__num_outputs__))
+        self.__create_weights__(init.zeros()(self.__num_outputs__), 'log_std_params')
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
         super().__call__(inputs, *args, **kwargs)
@@ -638,16 +641,21 @@ class GaussianPolicy(PolicyModule):
 class StateNetwork(NetworkModule):
     """StateNetwork is a neural network module that produces a state encoding of an agent's perceived state"""
 
-    def __init__(self):
-        super().__init__()
-        self.__power_type_encoding_size__ = 2
-        self.__weather_encoder__ = ConvolutionEncoder(128)
-        self.__market_encoder__ = ConvolutionEncoder(128)
-        self.__tariff_encoder__ = DepthEncoder(16)
-        self.__observation_encoder__ = DenseEncoder(512)
+    def __init__(self, name=None):
+        super().__init__(name)
+        self.__power_type_encoding_size__ = 8
+        self.__weather_encoder__ = ConvolutionEncoder(128,
+                                                      name=tf.name_scope("%s%s/" % (self.__scope__.name,
+                                                                                    'Weather')).name)
+        self.__market_encoder__ = ConvolutionEncoder(128,
+                                                     name=tf.name_scope("%s%s/" % (self.__scope__.name,
+                                                                                   'Market')).name)
+        self.__tariff_encoder__ = DepthEncoder(16, name=self.__scope__.name)
+        self.__observation_encoder__ = DenseEncoder(512, name=self.__scope__.name)
         self.__state_encoder__ = rnn.CudnnLSTM(1, 1024,
                                                kernel_initializer=init.orthogonal(),
-                                               bias_initializer=init.zeros())
+                                               bias_initializer=init.zeros(),
+                                               name=tf.name_scope("%s%s/" % (self.__scope__.name, 'LSTM')).name)
 
     @property
     def weights(self):
@@ -663,13 +671,13 @@ class StateNetwork(NetworkModule):
         super().build(input_shape)
         k_init = init.orthogonal()
 
-        self.__weight_map__['initial_state'] = tf.Variable(tf.zeros(self.state_shape(1)))
-        self.__weight_map__['power_type_encoding'] = tf.Variable(k_init((14, self.__power_type_encoding_size__)))
+        self.__create_weights__(tf.zeros(self.state_shape(1)), 'initial_state')
+        self.__create_weights__(k_init((14, self.__power_type_encoding_size__)), 'power_type_encoding')
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
         super().__call__(inputs, *args, **kwargs)
 
-        with tf.name_scope(type(self).__name__):
+        with self.__operation_scope__:
             input_shape = inputs.shape.as_list()
             state_in = kwargs['state_in']
             state_mask = kwargs['state_mask']
@@ -713,8 +721,8 @@ class StateNetwork(NetworkModule):
 class ActorNetwork(NetworkModule):
     """StateNetwork is a neural network module that produces the actions of an agent given a state"""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, name=None):
+        super().__init__(name)
         self.__policy__ = GroupPolicy([ActorNetwork.__build_market_policy__(),
                                        GroupPolicy([ActorNetwork.__build_tariff_policy__() for _ in range(5)])])
 
@@ -742,13 +750,13 @@ class ActorNetwork(NetworkModule):
         k_init = init.variance_scaling()
         b_init = init.zeros()
 
-        self.__weight_map__['actor_kernel'] = tf.Variable(k_init((input_shape[-1], logit_count)))
-        self.__weight_map__['actor_bias'] = tf.Variable(b_init(logit_count))
+        self.__create_weights__(k_init((input_shape[-1], logit_count)), 'actor_kernel')
+        self.__create_weights__(b_init(logit_count), 'actor_bias')
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
         super().__call__(inputs, *args, **kwargs)
 
-        with tf.name_scope(type(self).__name__):
+        with self.__operation_scope__:
             logits = tf.nn.bias_add(tf.matmul(inputs, self.__weight_map__['actor_kernel']),
                                     self.__weight_map__['actor_bias'])
 
@@ -761,17 +769,17 @@ class ActorNetwork(NetworkModule):
 
 class AgentModule(NetworkModule):
 
-    def __init__(self):
-        super().__init__()
-        self.state_network = StateNetwork()
-        self.actor_network = ActorNetwork()
+    def __init__(self, name):
+        super().__init__(name)
+        self.state_network = StateNetwork(name=self.__scope__.name)
+        self.actor_network = ActorNetwork(name=self.__scope__.name)
 
     @property
     def weights(self):
         return self.state_network.weights + self.actor_network.weights
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
-        with tf.name_scope(type(self).__name__):
+        with self.__operation_scope__:
             hidden_state, output_state = self.state_network(inputs, *args, **kwargs)
             policy, state_value = self.actor_network(hidden_state, *args, **kwargs)
 

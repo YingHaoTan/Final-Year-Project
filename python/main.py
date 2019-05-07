@@ -27,7 +27,6 @@ NUM_MINIBATCH = 21
 NUM_EPOCHS = 16
 UPDATE_STEPS = NUM_MINIBATCH * NUM_EPOCHS
 MAX_UPDATE_STEPS = 5000 * UPDATE_STEPS
-WARMUP_PHASE = 1 * UPDATE_STEPS
 LEARNING_RATE = 0.00025
 
 colorama.init()
@@ -57,8 +56,8 @@ input_normalizer = InputNormalizer(mask=tf.convert_to_tensor([*([False] * 4),
                                                               *([True, True, True, False, False] * 25),
                                                               *([True] * 194),
                                                               *([False, *([True] * 22)] * 20)]))
-model = AgentModule()
-base_model = AgentModule()
+model = AgentModule('AgentModel')
+base_model = AgentModule('BaseAgentModel')
 
 # Buffer declaration
 cash_buffer = np.zeros(shape=(BUFFER_SIZE, ROLLOUT_STEPS), dtype=np.float32)
@@ -111,12 +110,10 @@ entropy_loss = 0.01 * tf.reduce_mean(policy.entropy())
 loss = policy_loss + value_loss - entropy_loss
 
 global_step = tf.train.create_global_step()
-warmup_steps = WARMUP_PHASE
-learning_rate = tf.train.polynomial_decay(0.0, global_step, warmup_steps, LEARNING_RATE)
 grads = tf.gradients(loss, model.trainable_weights)
 clipped_grads, global_norm = tf.clip_by_global_norm(grads, 50.0)
 gv_list = zip(clipped_grads, model.trainable_weights)
-optimizer = tf.train.RMSPropOptimizer(learning_rate, decay=0.99, centered=True)
+optimizer = tf.train.RMSPropOptimizer(LEARNING_RATE, decay=0.99, centered=True)
 train_op = optimizer.apply_gradients(gv_list, global_step=global_step)
 
 # Tensorboard summary operations
@@ -135,9 +132,9 @@ with tf.name_scope("Reward"):
     tf.summary.histogram("Trained Prediction", state_value)
     tf.summary.histogram("Base Prediction", base_state_value)
 with tf.name_scope("Parameter"):
-    tf.summary.histogram("State", tf.concat([tf.reshape(w, [-1]) for w in model.state_network.weights],
+    tf.summary.histogram("State", tf.concat([tf.reshape(w, [-1]) for w in model.state_network.trainable_weights],
                                             axis=0))
-    tf.summary.histogram("Actor", tf.concat([tf.reshape(w, [-1]) for w in model.actor_network.weights],
+    tf.summary.histogram("Actor", tf.concat([tf.reshape(w, [-1]) for w in model.actor_network.trainable_weights],
                                             axis=0))
 with tf.name_scope("ProbabilityRatio"):
     tf.summary.histogram("Clipped", clipped_prob_ratio)
@@ -222,12 +219,12 @@ while rollout_queue is not None:
                         try:
                             if (step_count + 1) % UPDATE_STEPS == UPDATE_STEPS - 1:
                                 _, summary_value, step_count = sess.run([train_op, summary_op, global_step])
+                                summary_writer.add_summary(summary_value, global_step=step_count)
                             else:
                                 _, step_count = sess.run([train_op, global_step])
                             logging.info("Updating agent parameters step %d" % step_count)
                         except tf.errors.OutOfRangeError:
                             saver.save(sess, CHECKPOINT_PREFIX, global_step=step_count)
-                            summary_writer.add_summary(summary_value, global_step=step_count)
                             update_idx = step_count // (NUM_EPOCHS * NUM_MINIBATCH)
                             break
 

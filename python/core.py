@@ -265,7 +265,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
                     p_array[sorted_indices[idx_internal, 0], 0] = p_value
                 last_idx = nidx
         p_mean = 0.5 * (self.num_clients - 1)
-        p_variance = np.sum((np.arange(self.num_clients) - p_mean)**2)
+        p_variance = np.mean((np.arange(self.num_clients) - p_mean)**2)
 
         return (p_array - p_mean) / np.sqrt(p_variance)
 
