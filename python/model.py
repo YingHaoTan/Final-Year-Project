@@ -57,7 +57,6 @@ Outputs:
     1 linear output representing V(s)
 """
 import tensorflow as tf
-import tensorflow.contrib.cudnn_rnn as rnn
 from tensorflow import initializers as init
 from tensorflow_probability import distributions
 from functools import reduce
@@ -219,6 +218,9 @@ class ConvolutionEncoder(NetworkModule):
                 self.__create_weights__(l_initializer(p_kernel_size), "projection_kernel_%d" % residx)
                 self.__create_weights__(b_initializer(out_c), "projection_bias_%d" % residx)
 
+                initial_gate_value = tf.ones((1, out_c, 1, 1))
+                self.__create_weights__(initial_gate_value, "cgate_kernel_%d" % residx)
+
                 projection_in_c = out_c
                 projection_out_k = 1
 
@@ -258,7 +260,8 @@ class ConvolutionEncoder(NetworkModule):
                                                 self.__weight_map__["projection_bias_%d" % residx],
                                                 data_format='NCHW')
 
-                    conv_output = projection = conv_output + projection
+                    cgate = self.__weight_map__["cgate_kernel_%d" % residx]
+                    conv_output = projection = (cgate * conv_output) + projection
 
             conv_output_shape = conv_output.shape.as_list()
             output = tf.reshape(conv_output, (-1, conv_output_shape[1] * conv_output_shape[2] * conv_output_shape[3]))
@@ -298,7 +301,7 @@ class DepthEncoder(NetworkModule):
                 out_c = kernel_size[-1] + inc_layer_count
             else:
                 out_c = self.__num_output__
-                
+
             kernel_size = (1, 1, kernel_size[-1], out_c)
             self.__create_weights__(k_initializer(kernel_size), "conv_kernel_%d" % idx)
             self.__create_weights__(b_initializer(out_c), "conv_bias_%d" % idx)
@@ -309,6 +312,9 @@ class DepthEncoder(NetworkModule):
                 p_kernel_size = (1, 1, projection_in_c, out_c)
                 self.__create_weights__(l_initializer(p_kernel_size), "projection_kernel_%d" % residx)
                 self.__create_weights__(b_initializer(out_c), "projection_bias_%d" % residx)
+
+                initial_gate_value = tf.ones((1, out_c, 1, 1))
+                self.__create_weights__(initial_gate_value, "cgate_kernel_%d" % residx)
 
                 projection_in_c = out_c
 
@@ -339,7 +345,8 @@ class DepthEncoder(NetworkModule):
                                                 self.__weight_map__["projection_bias_%d" % residx],
                                                 data_format='NCHW')
 
-                    conv_output = projection = conv_output + projection
+                    cgate = self.__weight_map__["cgate_kernel_%d" % residx]
+                    conv_output = projection = (cgate * conv_output) + projection
 
             conv_output_shape = conv_output.shape.as_list()
             output = tf.reshape(conv_output, (-1, conv_output_shape[1] * conv_output_shape[2] * conv_output_shape[3]))
@@ -363,6 +370,7 @@ class DenseEncoder(NetworkModule):
 
     def build(self, input_shape: list):
         super().build(input_shape)
+
         l_initializer = init.orthogonal()
         k_initializer = self.__kernel_initializer__
         b_initializer = self.__bias_initializer__
@@ -387,6 +395,9 @@ class DenseEncoder(NetworkModule):
                 self.__create_weights__(l_initializer(p_kernel_size), "projection_kernel_%d" % residx)
                 self.__create_weights__(b_initializer(out_c), "projection_bias_%d" % residx)
 
+                initial_gate_value = tf.ones((1, out_c))
+                self.__create_weights__(initial_gate_value, "cgate_kernel_%d" % residx)
+
                 projection_in_c = out_c
 
     def __call__(self, inputs: tf.Tensor, *args, **kwargs):
@@ -406,7 +417,8 @@ class DenseEncoder(NetworkModule):
                                                           self.__weight_map__["projection_kernel_%d" % residx]),
                                                 self.__weight_map__["projection_bias_%d" % residx])
 
-                    output = projection = output + projection
+                    cgate = self.__weight_map__["cgate_kernel_%d" % residx]
+                    output = projection = (cgate * output) + projection
 
         return output
 
@@ -494,7 +506,7 @@ class GroupPolicy(PolicyModule):
     def __init__(self, policies: Union[list, tuple]):
         super().__init__()
         self.__policies__ = policies
-        
+
     @property
     def weights(self):
         return reduce(lambda x, y: x + y, map(lambda x: x.weights, self.__policies__))
@@ -652,10 +664,8 @@ class StateNetwork(NetworkModule):
                                                                                    'Market')).name)
         self.__tariff_encoder__ = DepthEncoder(16, name=self.__scope__.name)
         self.__observation_encoder__ = DenseEncoder(512, name=self.__scope__.name)
-        self.__state_encoder__ = rnn.CudnnLSTM(1, 1024,
-                                               kernel_initializer=init.orthogonal(),
-                                               bias_initializer=init.zeros(),
-                                               name=tf.name_scope("%s%s/" % (self.__scope__.name, 'LSTM')).name)
+        self.__state_encoder__ = tf.keras.layers.LSTM(units=1024, return_sequences=True, return_state=True,
+                                                      implementation=2)
 
     @property
     def weights(self):
@@ -665,7 +675,7 @@ class StateNetwork(NetworkModule):
                self.__observation_encoder__.weights + self.__state_encoder__.weights
 
     def state_shape(self, batch_size):
-        return batch_size, self.__state_encoder__.num_units, 2
+        return batch_size, self.__state_encoder__.units, 2
 
     def build(self, input_shape: Union[list, tuple]):
         super().build(input_shape)
@@ -694,12 +704,9 @@ class StateNetwork(NetworkModule):
             output = tf.concat(output, axis=-1)
             output = self.__observation_encoder__(output)
             output = tf.reshape(output, (-1, input_shape[1], output.shape.as_list()[-1]))
-            output = tf.transpose(output, (1, 0, 2))
-            output, state_out = self.__state_encoder__(output,
-                                                       tuple(tf.unstack(tf.expand_dims(p_state, axis=0), axis=-1)))
-            output = tf.transpose(output, (1, 0, 2))
-            output = tf.reshape(output, (-1, self.__state_encoder__.num_units))
-            state_out = tf.squeeze(tf.stack(state_out, axis=-1), axis=0)
+            state_encoder_out = self.__state_encoder__(output, initial_state=tf.unstack(p_state, axis=-1))
+            output = tf.reshape(state_encoder_out[0], (-1, self.__state_encoder__.units))
+            state_out = tf.stack(state_encoder_out[1:], axis=-1)
 
         return output, state_out
 

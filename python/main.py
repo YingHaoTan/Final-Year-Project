@@ -132,10 +132,8 @@ with tf.name_scope("Reward"):
     tf.summary.histogram("Trained Prediction", state_value)
     tf.summary.histogram("Base Prediction", base_state_value)
 with tf.name_scope("Parameter"):
-    tf.summary.histogram("State", tf.concat([tf.reshape(w, [-1]) for w in model.state_network.trainable_weights],
-                                            axis=0))
-    tf.summary.histogram("Actor", tf.concat([tf.reshape(w, [-1]) for w in model.actor_network.trainable_weights],
-                                            axis=0))
+    for parameter in model.trainable_weights:
+        tf.summary.histogram(parameter.name, parameter)
 with tf.name_scope("ProbabilityRatio"):
     tf.summary.histogram("Clipped", clipped_prob_ratio)
     tf.summary.histogram("Unclipped", prob_ratio)

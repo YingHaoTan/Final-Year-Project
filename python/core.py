@@ -234,7 +234,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
             self.sample_op = tf.concat([self.sample_op[:-1, :], policy.sample()], axis=0)
 
         self.__states__ = None
-        self.__reset_rollouts__ = np.zeros(shape=self.nsteps, dtype=np.bool)
+        self.__reset_status__ = []
         self.__observation_rollouts__ = np.zeros(shape=(self.num_clients, self.nsteps,
                                                         self.input_normalizer.num_inputs + 1),
                                                  dtype=np.float32)
@@ -272,6 +272,7 @@ class PowerTACRolloutHook(PowerTACGameHook):
     def on_start(self, session, **kwargs):
         super().on_start(session=session, **kwargs)
         self.__rollout_index__ = 0
+        self.__reset_status__ = []
 
     def on_step(self, observations, **kwargs):
         rollout_idx = self.__rollout_index__ % self.nsteps
@@ -280,8 +281,8 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
         if rollout_idx == 0:
             self.__states__ = kwargs['session'].run(self.internal_state_v)
+            self.__reset_status__.append(self.__reset__)
 
-        self.__reset_rollouts__[rollout_idx] = self.__reset__
         actions, state_values = super().on_step(observations, **kwargs)
 
         state_values = np.expand_dims(state_values, axis=1)
@@ -302,9 +303,11 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
             reward = advantage + self.__value_rollouts__
 
+            rollout_reset_status = self.__reset_status__.pop(0)
+            assert len(self.__reset_status__) == 1
             for idx in range(self.num_clients - 1):
                 self.rollout_queue.put((self.name,
-                                        self.__reset_rollouts__[idx],
+                                        rollout_reset_status,
                                         self.__states__[idx: idx + 1, :, :],
                                         self.__observation_rollouts__[idx: idx + 1, :, :],
                                         self.__action_rollouts__[idx: idx + 1, :, :],
@@ -320,4 +323,3 @@ class PowerTACRolloutHook(PowerTACGameHook):
 
     def update_queue(self, rollout_queue: queue.Queue):
         self.rollout_queue = rollout_queue
-        self.__rollout_index__ = 0
